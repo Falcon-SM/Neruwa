@@ -15,5 +15,9 @@
 	</array>
 	<key>GIDClientID</key>
 	<string>283065050707-89qb4pjjrr3fktcb1hrb5hpc060pbf67.apps.googleusercontent.com</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 </dict>
 </plist>

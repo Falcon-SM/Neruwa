@@ -1,50 +1,79 @@
 //
-//  HomeView.swift
+//  MainView.swift
 //  Sleeper
 //
-//  Created by Shun Matsumoto on 2026/07/12.
-//
 
-import Foundation
 import SwiftUI
 
+enum MainTab: Hashable {
+    case home
+    case sleep
+    case learning
+    case history
+    case settings
+}
+
 struct MainView: View {
-    @AppStorage("isFirstLaunch") private var isFirstLaunch: Bool = true
-    @State private var showOnboarding: Bool = false
     @Binding var user: AppUser?
-    
+    @State private var selectedTab: MainTab = .home
+
     var body: some View {
-        TabView{
-            Tab("Home", systemImage: "house"){
-                if let bindingUser = Binding($user) {
-                    HomeView(user: bindingUser)
+        TabView(selection: $selectedTab) {
+            Tab("ホーム", systemImage: "house.fill", value: .home) {
+                if let userBinding = Binding($user) {
+                    HomeView(user: userBinding, selectedTab: $selectedTab)
                 } else {
-                    Text("ユーザー情報がありません")
+                    MissingUserView()
                 }
             }
-            
-            Tab("Settings", systemImage:"gear"){
-                if let BindingUser = Binding($user) {
-                    SettingsView(user: BindingUser, onLogout: {
-                        self.user = nil
-                    })
+
+            Tab("睡眠", systemImage: "moon.zzz.fill", value: .sleep) {
+                SleepRecorderView()
+            }
+
+            Tab("学習", systemImage: "book.fill", value: .learning) {
+                ZStack {
+                    NightSkyBackground()
+                    SleepLearningView()
+                }
+            }
+
+            Tab("記録", systemImage: "chart.bar.xaxis", value: .history) {
+                HistoryView()
+            }
+
+            Tab("設定", systemImage: "gearshape.fill", value: .settings) {
+                if let userBinding = Binding($user) {
+                    SettingsView(
+                        user: userBinding,
+                        onLogout: { user = nil }
+                    )
                 } else {
-                    Text("エラー: ユーザー情報がありません")
+                    MissingUserView()
                 }
             }
         }
+        .tint(SleepPalette.warmGold)
         .tabBarMinimizeBehavior(.onScrollDown)
+        .preferredColorScheme(.dark)
     }
-    
-    private func closeOnBoarding() {
-        withAnimation {
-            showOnboarding = false
-            isFirstLaunch = false
-            
+}
+
+private struct MissingUserView: View {
+    var body: some View {
+        ZStack {
+            NightSkyBackground()
+            ContentUnavailableView(
+                "ユーザー情報がありません",
+                systemImage: "person.crop.circle.badge.exclamationmark"
+            )
+            .foregroundStyle(SleepPalette.text)
         }
     }
 }
 
 #Preview {
-    MainView(user: .constant(AppUser(id: "123", name: "表現2B")))
+    MainView(user: .constant(.guest))
+        .environmentObject(SleepStore())
+        .environmentObject(SleepLearningStore())
 }

@@ -1,0 +1,121 @@
+import Foundation
+
+public struct LearningCard: Identifiable, Codable, Hashable, Sendable {
+    public var id: UUID
+    public var prompt: String
+    public var answer: String
+    public var speechText: String
+    public var languageCode: String
+
+    /// One array per braille cell, containing dot numbers in the range 1...6.
+    /// Generic vocabulary cards leave this value as `nil`.
+    public var brailleCells: [[Int]]?
+
+    public init(
+        id: UUID = UUID(),
+        prompt: String,
+        answer: String,
+        speechText: String,
+        languageCode: String,
+        brailleCells: [[Int]]? = nil
+    ) {
+        self.id = id
+        self.prompt = prompt
+        self.answer = answer
+        self.speechText = speechText
+        self.languageCode = languageCode
+        self.brailleCells = Self.normalizedBrailleCells(brailleCells)
+    }
+
+    private static func normalizedBrailleCells(_ cells: [[Int]]?) -> [[Int]]? {
+        guard let cells else { return nil }
+        let normalized = cells.compactMap { cell -> [Int]? in
+            let dots = Array(Set(cell.filter { (1...6).contains($0) })).sorted()
+            return dots.isEmpty ? nil : dots
+        }
+        return normalized.isEmpty ? nil : normalized
+    }
+}
+
+public struct LearningTestResult: Identifiable, Codable, Hashable, Sendable {
+    public var id: UUID
+    public var completedAt: Date
+    public var correctAnswers: Int
+    public var totalQuestions: Int
+    public var cardIDs: Set<UUID>
+
+    public init(
+        id: UUID = UUID(),
+        completedAt: Date = Date(),
+        correctAnswers: Int,
+        totalQuestions: Int,
+        cardIDs: Set<UUID> = []
+    ) {
+        let normalizedTotal = max(0, totalQuestions)
+        self.id = id
+        self.completedAt = completedAt
+        self.correctAnswers = min(max(0, correctAnswers), normalizedTotal)
+        self.totalQuestions = normalizedTotal
+        self.cardIDs = cardIDs
+    }
+
+    /// Accuracy in the range 0...1.
+    public var accuracy: Double {
+        guard totalQuestions > 0 else { return 0 }
+        return Double(correctAnswers) / Double(totalQuestions)
+    }
+
+    public var scorePercentage: Int {
+        Int((accuracy * 100).rounded())
+    }
+}
+
+public struct SleepLearningSettings: Codable, Hashable, Sendable {
+    public var selectedCardIDs: Set<UUID>
+    public var intervalSeconds: Double
+    public var durationMinutes: Int
+    public var volume: Float
+    public var shuffle: Bool
+    public var autoStartWithSleepTimer: Bool
+
+    public init(
+        selectedCardIDs: Set<UUID> = [],
+        intervalSeconds: Double = 5 * 60,
+        durationMinutes: Int = 6 * 60 + 30,
+        volume: Float = 0.35,
+        shuffle: Bool = true,
+        autoStartWithSleepTimer: Bool = false
+    ) {
+        self.selectedCardIDs = selectedCardIDs
+        self.intervalSeconds = Self.clampedInterval(intervalSeconds)
+        self.durationMinutes = Self.clampedDuration(durationMinutes)
+        self.volume = Self.clampedVolume(volume)
+        self.shuffle = shuffle
+        self.autoStartWithSleepTimer = autoStartWithSleepTimer
+    }
+
+    public func normalized(availableCardIDs: Set<UUID>? = nil) -> Self {
+        var copy = self
+        if let availableCardIDs {
+            copy.selectedCardIDs.formIntersection(availableCardIDs)
+        }
+        copy.intervalSeconds = Self.clampedInterval(copy.intervalSeconds)
+        copy.durationMinutes = Self.clampedDuration(copy.durationMinutes)
+        copy.volume = Self.clampedVolume(copy.volume)
+        return copy
+    }
+
+    private static func clampedInterval(_ value: Double) -> Double {
+        guard value.isFinite else { return 5 * 60 }
+        return min(max(value, 1), 60 * 60)
+    }
+
+    private static func clampedDuration(_ value: Int) -> Int {
+        min(max(value, 1), 12 * 60)
+    }
+
+    private static func clampedVolume(_ value: Float) -> Float {
+        guard value.isFinite else { return 0.35 }
+        return min(max(value, 0), 1)
+    }
+}
