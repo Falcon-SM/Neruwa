@@ -6,18 +6,19 @@
 //
 
 import SwiftUI
+import GoogleSignIn
 
 struct ContentView: View {
+    @State private var user: AppUser?
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
+        if let _ = user {
+            MainView(user: $user)
+        } else {
+            LoginScreen(user: self.$user)
         }
-        .padding()
     }
 }
+
 
 #Preview {
     ContentView()

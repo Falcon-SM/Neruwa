@@ -1,1 +1,21 @@
+## Xcode
+# Build artifacts
+build/
+DerivedData/
+
+# Personal settings
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+libexec/
+*.xcuserdatad/
+xcuserdata/
+*.xccheckout
+*.moved-aside
+*.xcuserstate
+*.xcscmblueprint
+
+## OS artifacts
 .DS_Store
+
