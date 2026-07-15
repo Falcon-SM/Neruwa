@@ -23,9 +23,39 @@ public struct HealthKitSleepData: Hashable, Sendable {
     }
 }
 
+/// A presentation-safe projection of HealthKit's State of Mind sample.
+///
+/// Keeping HealthKit framework types out of the view makes the selected-day
+/// history UI easy to render and keeps iOS 18 availability checks in one place.
+public struct HealthKitStateOfMindData: Identifiable, Hashable, Sendable {
+    public let id: UUID
+    public let date: Date
+    public let valence: Double
+    public let classification: String
+    public let labels: [String]
+    public let isDailyMood: Bool
+
+    public init(
+        id: UUID,
+        date: Date,
+        valence: Double,
+        classification: String,
+        labels: [String],
+        isDailyMood: Bool
+    ) {
+        self.id = id
+        self.date = date
+        self.valence = min(max(valence, -1), 1)
+        self.classification = classification
+        self.labels = labels
+        self.isDailyMood = isDailyMood
+    }
+}
+
 public enum HealthKitManagerError: LocalizedError {
     case unavailable
     case sleepTypeUnavailable
+    case stateOfMindUnavailable
     case authorizationFailed(String?)
     case queryFailed(String)
     case noSleepData
@@ -36,6 +66,8 @@ public enum HealthKitManagerError: LocalizedError {
             "この端末ではヘルスケアを利用できません。"
         case .sleepTypeUnavailable:
             "ヘルスケアの睡眠データを読み込めません。"
+        case .stateOfMindUnavailable:
+            "このiOSではヘルスケアの心の状態を読み込めません。"
         case .authorizationFailed(let message):
             if let message, !message.isEmpty {
                 "ヘルスケアへのアクセスを許可できませんでした（\(message)）。"
@@ -77,6 +109,22 @@ public final class HealthKitManager {
                 }
             }
         }
+    }
+
+    /// Requests read-only access to State of Mind separately from sleep data.
+    /// HealthKit intentionally does not reveal whether read access was denied;
+    /// a denied request therefore has the same empty-result fallback as a day
+    /// with no logged state of mind.
+    public func requestStateOfMindAuthorization() async throws {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            throw HealthKitManagerError.unavailable
+        }
+        guard #available(iOS 18.0, *) else {
+            throw HealthKitManagerError.stateOfMindUnavailable
+        }
+
+        let stateOfMindType = HKObjectType.stateOfMindType()
+        try await requestAuthorization(reading: [stateOfMindType])
     }
 
     /// Reads a 36-hour window and returns one coherent sleep episode from one source.
@@ -135,6 +183,153 @@ public final class HealthKitManager {
             externalIdentifier: candidate.externalIdentifier,
             sourceName: candidate.sourceName
         )
+    }
+
+    /// Returns State of Mind samples logged on the selected local calendar day.
+    /// An empty result means either no data or read access was not granted.
+    public func fetchStateOfMind(
+        for day: Date,
+        calendar: Calendar = .current
+    ) async throws -> [HealthKitStateOfMindData] {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            throw HealthKitManagerError.unavailable
+        }
+        guard #available(iOS 18.0, *) else {
+            throw HealthKitManagerError.stateOfMindUnavailable
+        }
+        guard let dayEnd = calendar.date(
+            byAdding: .day,
+            value: 1,
+            to: calendar.startOfDay(for: day)
+        ) else {
+            return []
+        }
+
+        let dayStart = calendar.startOfDay(for: day)
+        let stateOfMindType = HKObjectType.stateOfMindType()
+        let predicate = HKQuery.predicateForSamples(
+            withStart: dayStart,
+            end: dayEnd,
+            options: [.strictStartDate]
+        )
+        let sortDescriptor = NSSortDescriptor(
+            key: HKSampleSortIdentifierStartDate,
+            ascending: false
+        )
+
+        let samples = try await withCheckedThrowingContinuation {
+            (continuation: CheckedContinuation<[HKStateOfMind], Error>) in
+            let query = HKSampleQuery(
+                sampleType: stateOfMindType,
+                predicate: predicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: [sortDescriptor]
+            ) { _, results, error in
+                if let error {
+                    continuation.resume(
+                        throwing: HealthKitManagerError.queryFailed(error.localizedDescription)
+                    )
+                    return
+                }
+                continuation.resume(returning: results as? [HKStateOfMind] ?? [])
+            }
+            healthStore.execute(query)
+        }
+
+        return samples.map { sample in
+            HealthKitStateOfMindData(
+                id: sample.uuid,
+                date: sample.startDate,
+                valence: sample.valence,
+                classification: Self.localizedClassification(sample.valenceClassification),
+                labels: sample.labels.map(Self.localizedLabel),
+                isDailyMood: sample.kind == .dailyMood
+            )
+        }
+    }
+
+    private func requestAuthorization(reading types: Set<HKObjectType>) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            healthStore.requestAuthorization(toShare: [], read: types) { success, error in
+                if success {
+                    continuation.resume()
+                } else {
+                    continuation.resume(
+                        throwing: HealthKitManagerError.authorizationFailed(error?.localizedDescription)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@available(iOS 18.0, *)
+private extension HealthKitManager {
+    static func localizedClassification(
+        _ classification: HKStateOfMind.ValenceClassification
+    ) -> String {
+        switch classification {
+        case .veryUnpleasant:
+            "非常に不快"
+        case .unpleasant:
+            "不快"
+        case .slightlyUnpleasant:
+            "やや不快"
+        case .neutral:
+            "中立"
+        case .slightlyPleasant:
+            "やや快適"
+        case .pleasant:
+            "快適"
+        case .veryPleasant:
+            "非常に快適"
+        @unknown default:
+            "記録あり"
+        }
+    }
+
+    static func localizedLabel(_ label: HKStateOfMind.Label) -> String {
+        switch label {
+        case .amazed: "驚き"
+        case .amused: "愉快"
+        case .angry: "怒り"
+        case .anxious: "不安"
+        case .ashamed: "恥ずかしい"
+        case .brave: "勇敢"
+        case .calm: "穏やか"
+        case .content: "満ち足りた"
+        case .disappointed: "失望"
+        case .discouraged: "落胆"
+        case .disgusted: "嫌悪"
+        case .embarrassed: "当惑"
+        case .excited: "興奮"
+        case .frustrated: "いら立ち"
+        case .grateful: "感謝"
+        case .guilty: "罪悪感"
+        case .happy: "幸せ"
+        case .hopeless: "絶望"
+        case .irritated: "苛立ち"
+        case .jealous: "嫉妬"
+        case .joyful: "喜び"
+        case .lonely: "孤独"
+        case .passionate: "情熱的"
+        case .peaceful: "安らか"
+        case .proud: "誇らしい"
+        case .relieved: "安心"
+        case .sad: "悲しい"
+        case .scared: "怖い"
+        case .stressed: "ストレス"
+        case .surprised: "びっくり"
+        case .worried: "心配"
+        case .annoyed: "うんざり"
+        case .confident: "自信"
+        case .drained: "消耗"
+        case .hopeful: "希望"
+        case .indifferent: "無関心"
+        case .overwhelmed: "圧倒された"
+        case .satisfied: "満足"
+        @unknown default: "その他"
+        }
     }
 }
 

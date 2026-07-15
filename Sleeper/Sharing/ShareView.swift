@@ -7,8 +7,9 @@ struct ShareView: View {
 
     let onOpenSettings: () -> Void
 
-    @State private var comment = ""
-    @State private var includesMood = false
+    @AppStorage(SleepFeedVisibility.defaultsKey)
+    private var defaultVisibilityRaw = SleepFeedVisibility.everyone.rawValue
+    @State private var isComposerPresented = false
 
     init(user: Binding<AppUser>, onOpenSettings: @escaping () -> Void) {
         _user = user
@@ -28,29 +29,34 @@ struct ShareView: View {
     var body: some View {
         NavigationStack {
             List {
-                profileSection
-
-                if let notice = feedStore.notice {
-                    noticeSection(notice)
-                }
-
-                if let summary = latestSummary {
-                    composerSection(summary)
+                if feedStore.isLoading, feedStore.posts.isEmpty {
+                    HStack(spacing: 12) {
+                        ProgressView()
+                        Text("みんなの睡眠を読み込んでいます")
+                            .foregroundStyle(.secondary)
+                    }
+                } else if feedStore.posts.isEmpty {
+                    ContentUnavailableView {
+                        Label("投稿はまだありません", systemImage: "moon.zzz")
+                    } description: {
+                        Text("最初の睡眠ログが届くと、ここに表示されます。")
+                    }
                 } else {
-                    emptyComposerSection
-                }
-
-                feedSection
-                privacySection
-
-                if let summary = latestSummary {
-                    externalShareSection(summary)
+                    ForEach(feedStore.posts) { post in
+                        SleepFeedPostRow(
+                            post: post,
+                            isReacting: feedStore.reactingPostIDs.contains(post.id),
+                            onReact: {
+                                Task { await feedStore.toggleReaction(for: post.id) }
+                            }
+                        )
+                    }
                 }
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .ambientScreenBackground()
-            .navigationTitle("共有")
+            .navigationTitle("みんなの睡眠")
             .navigationBarTitleDisplayMode(.large)
             .refreshable {
                 await feedStore.loadFeed()
@@ -58,54 +64,91 @@ struct ShareView: View {
             .task {
                 await feedStore.loadFeed()
             }
+            .toolbar {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        isComposerPresented = true
+                    } label: {
+                        Label("投稿する", systemImage: "square.and.pencil")
+                    }
+
+                    Button(action: onOpenSettings) {
+                        Label("設定", systemImage: "gearshape")
+                    }
+                }
+            }
+            .sheet(isPresented: $isComposerPresented) {
+                SleepPostComposerView(
+                    summary: latestSummary,
+                    feedStore: feedStore,
+                    defaultVisibility: defaultVisibility
+                )
+            }
+        }
+    }
+
+    private var defaultVisibility: SleepFeedVisibility {
+        SleepFeedVisibility(rawValue: defaultVisibilityRaw) ?? .everyone
+    }
+}
+
+private struct SleepPostComposerView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let summary: SleepShareSummary?
+    @ObservedObject var feedStore: SleepFeedStore
+
+    @State private var comment = ""
+    @State private var includesMood = false
+    @State private var visibility: SleepFeedVisibility
+
+    init(
+        summary: SleepShareSummary?,
+        feedStore: SleepFeedStore,
+        defaultVisibility: SleepFeedVisibility
+    ) {
+        self.summary = summary
+        self.feedStore = feedStore
+        _visibility = State(initialValue: defaultVisibility)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let summary {
+                    sleepSection(summary)
+                    commentSection(summary)
+                    visibilitySection
+                    publishSection(summary)
+                    externalShareSection(summary)
+                    privacySection
+                } else {
+                    ContentUnavailableView {
+                        Label("共有できる記録がありません", systemImage: "moon.zzz")
+                    } description: {
+                        Text("睡眠を記録すると、最新の記録を投稿できます。")
+                    }
+                }
+            }
+            .navigationTitle("睡眠を投稿")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("閉じる") {
+                        dismiss()
+                    }
+                }
+            }
             .onChange(of: comment) { _, newValue in
                 let limited = String(newValue.prefix(80))
                 if limited != newValue {
                     comment = limited
                 }
             }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: onOpenSettings) {
-                        Label("設定", systemImage: "gearshape")
-                    }
-                }
-            }
         }
     }
 
-    private var profileSection: some View {
-        Section {
-            LabeledContent {
-                Text(feedStore.publicAlias)
-                    .fontWeight(.medium)
-            } label: {
-                Label("公開名", systemImage: "person.crop.circle.fill")
-            }
-
-            LabeledContent {
-                Text(feedStore.isCloudEnabled ? "認証ユーザー" : "この端末のみ")
-                    .foregroundStyle(.secondary)
-            } label: {
-                Label(
-                    "共有範囲",
-                    systemImage: feedStore.isCloudEnabled ? "person.2.fill" : "iphone"
-                )
-            }
-        } footer: {
-            Text("Googleの名前やメールアドレスは表示せず、ねるね用の匿名名を使います。")
-        }
-    }
-
-    private func noticeSection(_ notice: String) -> some View {
-        Section {
-            Label(notice, systemImage: "info.circle")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private func composerSection(_ summary: SleepShareSummary) -> some View {
+    private func sleepSection(_ summary: SleepShareSummary) -> some View {
         Section {
             LabeledContent {
                 VStack(alignment: .trailing, spacing: 2) {
@@ -120,6 +163,14 @@ struct ShareView: View {
                 Label("最新の睡眠", systemImage: "moon.zzz.fill")
             }
 
+            LabeledContent("公開名", value: feedStore.publicAlias)
+        } footer: {
+            Text("Googleの名前やメールアドレスは表示せず、ねるね用の匿名名を使います。")
+        }
+    }
+
+    private func commentSection(_ summary: SleepShareSummary) -> some View {
+        Section {
             TextField(
                 "ひとこと（任意）",
                 text: $comment,
@@ -132,9 +183,7 @@ struct ShareView: View {
                 Label("個人情報は書かないでください", systemImage: "lock.shield")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-
                 Spacer()
-
                 Text("\(comment.count)/80")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -145,7 +194,36 @@ struct ShareView: View {
                     Label("気分も共有  \(mood.emoji)", systemImage: "face.smiling")
                 }
             }
+        } header: {
+            Text("投稿内容")
+        }
+    }
 
+    private var visibilitySection: some View {
+        Section {
+            Picker("公開範囲", selection: $visibility) {
+                ForEach(SleepFeedVisibility.allCases) { option in
+                    Label(option.title, systemImage: option.systemImage)
+                        .tag(option)
+                }
+            }
+
+            LabeledContent {
+                Text("準備中")
+                    .foregroundStyle(.secondary)
+            } label: {
+                Label("友達限定", systemImage: "person.2.badge.gearshape")
+            }
+            .foregroundStyle(.secondary)
+        } header: {
+            Text("公開範囲")
+        } footer: {
+            Text(visibility.detail + "。友達の招待・限定公開はまだ実装していません。")
+        }
+    }
+
+    private func publishSection(_ summary: SleepShareSummary) -> some View {
+        Section {
             Button {
                 Task { await publish(summary) }
             } label: {
@@ -155,75 +233,24 @@ struct ShareView: View {
                     } else {
                         Image(systemName: "paperplane.fill")
                     }
-                    Text(feedStore.isPublishing ? "投稿しています…" : "フィードに投稿")
+                    Text(feedStore.isPublishing ? "投稿しています…" : "投稿する")
                 }
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .disabled(feedStore.isPublishing)
-        } header: {
-            Text("睡眠を共有")
-        } footer: {
-            Text("睡眠時間と目標達成率を共有します。気分は自分でオンにしたときだけ含まれます。")
-        }
-    }
 
-    private var emptyComposerSection: some View {
-        Section {
-            ContentUnavailableView {
-                Label("共有できる記録がありません", systemImage: "moon.zzz")
-            } description: {
-                Text("睡眠を記録すると、最新の記録を短いひとことと一緒に投稿できます。")
+            if let notice = feedStore.notice {
+                Label(notice, systemImage: "info.circle")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
-        } header: {
-            Text("睡眠を共有")
-        }
-    }
-
-    private var feedSection: some View {
-        Section {
-            if feedStore.isLoading, feedStore.posts.isEmpty {
-                HStack(spacing: 12) {
-                    ProgressView()
-                    Text("みんなの記録を読み込んでいます")
-                        .foregroundStyle(.secondary)
-                }
-            } else {
-                ForEach(feedStore.posts) { post in
-                    SleepFeedPostRow(
-                        post: post,
-                        isReacting: feedStore.reactingPostIDs.contains(post.id),
-                        onReact: {
-                            Task { await feedStore.toggleReaction(for: post.id) }
-                        }
-                    )
-                }
-            }
-        } header: {
-            HStack {
-                Text("みんなの睡眠")
-                Spacer()
-                if feedStore.isLoading {
-                    ProgressView()
-                        .controlSize(.small)
-                }
-            }
-        } footer: {
-            Text("フォロワー数やランキングのない、小さな睡眠ログです。下に引いて更新できます。")
-        }
-    }
-
-    private var privacySection: some View {
-        Section("共有されない情報") {
-            Label("正確な就寝・起床時刻", systemImage: "clock.badge.xmark")
-            Label("睡眠ステージとHealthKitの識別情報", systemImage: "heart.text.square")
-            Label("日記と朝の振り返り本文", systemImage: "note.text")
         }
     }
 
     private func externalShareSection(_ summary: SleepShareSummary) -> some View {
-        Section {
+        Section("その他") {
             ShareLink(
                 item: summary.shareText(
                     options: SleepShareOptions(
@@ -236,10 +263,14 @@ struct ShareView: View {
             ) {
                 Label("ほかのアプリで共有", systemImage: "square.and.arrow.up")
             }
-        } header: {
-            Text("その他")
-        } footer: {
-            Text("必要なときだけiOSの共有シートを開きます。")
+        }
+    }
+
+    private var privacySection: some View {
+        Section("共有されない情報") {
+            Label("正確な就寝・起床時刻", systemImage: "clock.badge.xmark")
+            Label("睡眠ステージとHealthKitの識別情報", systemImage: "heart.text.square")
+            Label("日記と朝の振り返り本文", systemImage: "note.text")
         }
     }
 
@@ -247,12 +278,12 @@ struct ShareView: View {
         let didPublish = await feedStore.publish(
             summary: summary,
             comment: comment,
-            includesMood: includesMood
+            includesMood: includesMood,
+            visibility: visibility
         )
         guard didPublish else { return }
-        comment = ""
-        includesMood = false
         HapticsManager.instance.notification(type: .success)
+        dismiss()
     }
 }
 

@@ -52,22 +52,25 @@ struct SleepLearningView: View {
     private let targetSleepSessionID: UUID?
     private let onContinueToSleep: (() -> Void)?
     private let onOpenHistory: (() -> Void)?
-    private let onTestCompleted: (() -> Void)?
+    private let onTestCompleted: ((LearningTestResult) -> Void)?
     private let showsPhaseSelector: Bool
+    private let showsStudyContinuation: Bool
     private let allowsTestSkipping: Bool
 
     init(
         phase: Binding<SleepLearningPhase> = .constant(.study),
         targetSleepSessionID: UUID? = nil,
-        showsPhaseSelector: Bool = true,
+        showsPhaseSelector: Bool = false,
+        showsStudyContinuation: Bool = false,
         allowsTestSkipping: Bool = true,
         onContinueToSleep: (() -> Void)? = nil,
         onOpenHistory: (() -> Void)? = nil,
-        onTestCompleted: (() -> Void)? = nil
+        onTestCompleted: ((LearningTestResult) -> Void)? = nil
     ) {
         _phase = phase
         self.targetSleepSessionID = targetSleepSessionID
         self.showsPhaseSelector = showsPhaseSelector
+        self.showsStudyContinuation = showsStudyContinuation
         self.allowsTestSkipping = allowsTestSkipping
         self.onContinueToSleep = onContinueToSleep
         self.onOpenHistory = onOpenHistory
@@ -97,7 +100,7 @@ struct SleepLearningView: View {
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .ambientScreenBackground()
-            .navigationTitle("睡眠学習")
+            .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.large)
         }
         .onAppear {
@@ -259,15 +262,18 @@ struct SleepLearningView: View {
             }
             .buttonStyle(.bordered)
 
-            Button {
-                withAnimation(.snappy) {
-                    phase = .audio
+            if showsStudyContinuation {
+                Button {
+                    withAnimation(.snappy) {
+                        phase = .audio
+                    }
+                } label: {
+                    Label("次は睡眠音声", systemImage: "speaker.wave.2.fill")
+                        .frame(maxWidth: .infinity)
                 }
-            } label: {
-                Label("次は睡眠音声", systemImage: "speaker.wave.2.fill")
-                    .frame(maxWidth: .infinity)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
             }
-            .buttonStyle(.borderedProminent)
         }
     }
 
@@ -559,6 +565,7 @@ struct SleepLearningView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
 
                 if let onOpenHistory {
                     Button(action: onOpenHistory) {
@@ -566,6 +573,7 @@ struct SleepLearningView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
+                    .controlSize(.large)
                 }
             }
         } else if let question = currentQuizQuestion {
@@ -614,6 +622,7 @@ struct SleepLearningView: View {
                         .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
                 }
             }
         } else {
@@ -629,6 +638,7 @@ struct SleepLearningView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .disabled(quizDeck.count < 2)
 
                 if quizDeck.count < 2 {
@@ -682,7 +692,8 @@ struct SleepLearningView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bordered)
+        .controlSize(.large)
         .disabled(hasAnswered)
         .accessibilityLabel(option.text)
         .accessibilityValue(quizOptionAccessibilityValue(isSelected: isSelected, isCorrect: isCorrect, hasAnswered: hasAnswered))
@@ -717,6 +728,14 @@ struct SleepLearningView: View {
     private var currentStudyCard: LearningCard? {
         guard learningStore.cards.indices.contains(studyIndex) else { return nil }
         return learningStore.cards[studyIndex]
+    }
+
+    private var navigationTitle: String {
+        switch phase {
+        case .study: "睡眠学習"
+        case .audio: "睡眠音声"
+        case .test: "朝テスト"
+        }
     }
 
     private var playbackTint: Color {
@@ -918,14 +937,14 @@ struct SleepLearningView: View {
                 selectedQuizOptionID = nil
             }
         } else {
-            guard learningStore.saveTestResult(
+            guard let result = learningStore.saveTestResult(
                 correctAnswers: correctQuizAnswers,
                 totalQuestions: quizQuestions.count,
                 sleepSessionID: targetSleepSessionID
-            ) != nil else {
+            ) else {
                 return
             }
-            onTestCompleted?()
+            onTestCompleted?(result)
             withAnimation(.snappy) {
                 isQuizComplete = true
             }
@@ -941,15 +960,15 @@ struct SleepLearningView: View {
     }
 
     private func skipMorningTest(then completion: () -> Void) {
-        guard learningStore.saveTestResult(
+        guard let result = learningStore.saveTestResult(
             correctAnswers: 0,
             totalQuestions: 0,
             sleepSessionID: targetSleepSessionID,
             wasSkipped: true
-        ) != nil else {
+        ) else {
             return
         }
-        onTestCompleted?()
+        onTestCompleted?(result)
         completion()
     }
 

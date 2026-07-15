@@ -18,6 +18,8 @@ final class SleepFeedStore: ObservableObject {
     private let defaults: UserDefaults
     private let persistenceKey: String
     private let cloud: SleepFeedFirestoreRepository?
+    private let localOnlyFeedNotice: String
+    private let localOnlyPublishNotice: String
     private var cachedPosts: [SleepFeedPost]
     private var showsSamples: Bool
 
@@ -25,6 +27,12 @@ final class SleepFeedStore: ObservableObject {
         self.defaults = defaults
         self.persistenceKey = "\(Self.persistencePrefix).\(user.id)"
         self.publicAlias = SleepFeedIdentity.publicAlias(for: user)
+        self.localOnlyFeedNotice = user.isGuest
+            ? "ゲストの投稿とリアクションは、この端末だけに保存されます。"
+            : "クラウド共有を利用できないため、投稿とリアクションはこの端末だけに保存されます。"
+        self.localOnlyPublishNotice = user.isGuest
+            ? "ログインしていないため、この端末だけに投稿を保存しました。"
+            : "クラウド共有を利用できないため、この端末だけに投稿を保存しました。"
 
         if !user.isGuest,
            FirebaseApp.app() != nil,
@@ -49,7 +57,7 @@ final class SleepFeedStore: ObservableObject {
         guard let cloud else {
             showsSamples = true
             updateVisiblePosts()
-            notice = "ゲストの投稿とリアクションは、この端末だけに保存されます。"
+            notice = localOnlyFeedNotice
             return
         }
 
@@ -76,7 +84,8 @@ final class SleepFeedStore: ObservableObject {
     func publish(
         summary: SleepShareSummary,
         comment: String,
-        includesMood: Bool
+        includesMood: Bool,
+        visibility: SleepFeedVisibility
     ) async -> Bool {
         guard !isPublishing else { return false }
         isPublishing = true
@@ -94,8 +103,13 @@ final class SleepFeedStore: ObservableObject {
         persistCache()
         updateVisiblePosts()
 
+        guard visibility == .everyone else {
+            notice = "この端末だけに投稿を保存しました。"
+            return true
+        }
+
         guard let cloud else {
-            notice = "この端末のフィードに投稿しました。ログインするとほかのユーザーと共有できます。"
+            notice = localOnlyPublishNotice
             return true
         }
 

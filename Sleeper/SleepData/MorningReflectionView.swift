@@ -31,7 +31,7 @@ struct MorningReflectionView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 if let session = sleepStore.session(id: sessionID) {
                     sessionSection(session)
                     moodSection
@@ -53,8 +53,11 @@ struct MorningReflectionView: View {
                     }
                 }
             }
+            .listStyle(.insetGrouped)
             .scrollDismissesKeyboard(.interactively)
-            .navigationTitle("朝の振り返り")
+            .scrollContentBackground(.hidden)
+            .ambientScreenBackground()
+            .navigationTitle("今日の気分")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if allowsDismissal {
@@ -66,9 +69,11 @@ struct MorningReflectionView: View {
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存", action: saveReflection)
-                        .fontWeight(.semibold)
-                        .disabled(selectedMood == nil)
+                    if sleepStore.session(id: sessionID) != nil {
+                        Button(allowsDismissal ? "保存" : "次へ", action: saveReflection)
+                            .fontWeight(.semibold)
+                            .disabled(selectedMood == nil)
+                    }
                 }
 
                 ToolbarItemGroup(placement: .keyboard) {
@@ -88,7 +93,30 @@ struct MorningReflectionView: View {
     }
 
     private func sessionSection(_ session: SleepSession) -> some View {
-        Section("昨夜の睡眠") {
+        Section {
+            VStack(spacing: 14) {
+                SleepDurationClockDial(
+                    elapsed: TimeInterval(session.durationMinutes * 60),
+                    displaysSecondHand: false
+                )
+                .frame(width: 190, height: 190)
+
+                VStack(spacing: 3) {
+                    Text(SleepDurationFormatter.summary(minutes: session.durationMinutes))
+                        .font(.system(.title2, design: .rounded, weight: .semibold))
+                        .monospacedDigit()
+                    Text("昨夜の睡眠時間")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(
+                "昨夜の睡眠時間、\(SleepDurationFormatter.summary(minutes: session.durationMinutes))"
+            )
+
             LabeledContent("就寝") {
                 Text(session.startDate, format: .dateTime.hour().minute())
                     .monospacedDigit()
@@ -99,18 +127,18 @@ struct MorningReflectionView: View {
                     .monospacedDigit()
             }
 
-            LabeledContent("睡眠時間") {
-                Text(SleepDurationFormatter.compact(minutes: session.durationMinutes))
-                    .fontWeight(.semibold)
-                    .monospacedDigit()
+            ProgressView(
+                value: Double(min(session.durationMinutes, session.targetMinutes)),
+                total: Double(max(session.targetMinutes, 1))
+            ) {
+                Text("睡眠目標")
+            } currentValueLabel: {
+                Text(targetMessage(for: session))
+                    .font(.caption)
             }
-
-            Label(
-                targetMessage(for: session),
-                systemImage: session.shortageMinutes > 0 ? "chart.line.downtrend.xyaxis" : "checkmark.circle.fill"
-            )
-            .font(.footnote)
-            .foregroundStyle(session.shortageMinutes > 0 ? .orange : .green)
+            .tint(session.shortageMinutes > 0 ? .orange : .green)
+        } header: {
+            Text("昨夜の睡眠")
         }
     }
 
@@ -125,8 +153,7 @@ struct MorningReflectionView: View {
                         .tag(Optional(mood))
                 }
             }
-            .pickerStyle(.inline)
-            .labelsHidden()
+            .pickerStyle(.navigationLink)
         } header: {
             Text("今朝の気分")
         } footer: {

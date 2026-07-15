@@ -11,16 +11,25 @@ enum AmbientScene: Equatable, Sendable {
 
     static func timeFallback(
         at date: Date = .now,
-        calendar: Calendar = .current
+        calendar: Calendar = .current,
+        schedule: DailyFlowSchedule = .default
     ) -> AmbientScene {
-        switch calendar.component(.hour, from: date) {
-        case 5..<9:
-            .morning
-        case 9..<19:
-            .day
-        default:
-            .night
+        guard schedule.period(at: date, calendar: calendar) == .morning else {
+            return .night
         }
+
+        let components = calendar.dateComponents([.hour, .minute], from: date)
+        let currentMinute = (components.hour ?? 0) * 60 + (components.minute ?? 0)
+        let minutesSinceMorning = (
+            currentMinute - schedule.morningStartMinutes + 24 * 60
+        ) % (24 * 60)
+        let morningDuration = (
+            schedule.nightStartMinutes - schedule.morningStartMinutes + 24 * 60
+        ) % (24 * 60)
+
+        return minutesSinceMorning < min(4 * 60, morningDuration)
+            ? .morning
+            : .day
     }
 }
 

@@ -14,6 +14,7 @@ struct HomeView: View {
     @EnvironmentObject private var sleepStore: SleepStore
     @EnvironmentObject private var learningStore: SleepLearningStore
     @EnvironmentObject private var eveningStore: EveningStore
+    @EnvironmentObject private var mandatoryFlowStore: MandatoryDailyFlowStore
     @Binding var user: AppUser
     @Binding var selectedTab: MainTab
 
@@ -21,10 +22,14 @@ struct HomeView: View {
     private let calendar: Calendar
     private let onStartEveningFlow: () -> Void
     private let onResumeReflection: (UUID) -> Void
-    private let onOpenLearning: (SleepLearningPhase, UUID?) -> Void
+    private let onOpenLearning: () -> Void
     private let onOpenSettings: () -> Void
 
     @AppStorage("sleepTargetMinutes") private var targetMinutes = 480
+    @AppStorage(DailyFlowSchedule.morningStartDefaultsKey)
+    private var morningStartMinutes = DailyFlowSchedule.defaultMorningStartMinutes
+    @AppStorage(DailyFlowSchedule.nightStartDefaultsKey)
+    private var nightStartMinutes = DailyFlowSchedule.defaultNightStartMinutes
 
     init(
         user: Binding<AppUser>,
@@ -33,7 +38,7 @@ struct HomeView: View {
         calendar: Calendar = .current,
         onStartEveningFlow: @escaping () -> Void = {},
         onResumeReflection: @escaping (UUID) -> Void = { _ in },
-        onOpenLearning: @escaping (SleepLearningPhase, UUID?) -> Void = { _, _ in },
+        onOpenLearning: @escaping () -> Void = {},
         onOpenSettings: @escaping () -> Void = {}
     ) {
         _user = user
@@ -50,20 +55,65 @@ struct HomeView: View {
         sleepStore.sessions.max(by: { $0.endDate < $1.endDate })
     }
 
-    private var latestTodaySession: SleepSession? {
-        sleepStore.sessions
-            .filter { calendar.isDate($0.endDate, inSameDayAs: now) }
+    private var latestMorningPeriodSession: SleepSession? {
+        let targetDay = DailyFlowPeriod.morningFlowDay(
+            containing: now,
+            calendar: calendar,
+            schedule: dailyFlowSchedule
+        )
+        return sleepStore.sessions
+            .filter {
+                calendar.isDate(
+                    DailyFlowPeriod.morningFlowDay(
+                        containing: $0.endDate,
+                        calendar: calendar,
+                        schedule: dailyFlowSchedule
+                    ),
+                    inSameDayAs: targetDay
+                )
+            }
             .max(by: { $0.endDate < $1.endDate })
     }
 
     private var morningFlowSession: SleepSession? {
         guard dailyFlowPeriod == .morning else { return nil }
-        guard let session = latestTodaySession else { return nil }
+        if let targetID = morningFlowProgress?.targetSleepSessionID,
+           let target = sleepStore.session(id: targetID) {
+            return target
+        }
+        guard let session = latestMorningPeriodSession else { return nil }
         return session
     }
 
+    private var morningFlowProgress: MandatoryDailyFlowProgress? {
+        mandatoryFlowStore.progress(
+            for: MandatoryDailyFlowContext(
+                profileID: user.id,
+                period: .morning,
+                targetDay: DailyFlowPeriod.morningFlowDay(
+                    containing: now,
+                    calendar: calendar,
+                    schedule: dailyFlowSchedule
+                ),
+                calendar: calendar,
+                schedule: dailyFlowSchedule
+            )
+        )
+    }
+
     private var dailyFlowPeriod: DailyFlowPeriod {
-        DailyFlowPeriod(date: now, calendar: calendar)
+        DailyFlowPeriod(
+            date: now,
+            calendar: calendar,
+            schedule: dailyFlowSchedule
+        )
+    }
+
+    private var dailyFlowSchedule: DailyFlowSchedule {
+        DailyFlowSchedule(
+            morningStartMinutes: morningStartMinutes,
+            nightStartMinutes: nightStartMinutes
+        )
     }
 
     private func morningTestResult(for sessionID: UUID) -> LearningTestResult? {
@@ -124,7 +174,7 @@ struct HomeView: View {
             if dailyFlowPeriod == .night {
                 nightFlowContent
             } else if let session = morningFlowSession {
-                let testResult = morningTestResult(for: session.id)
+                let testState = morningTestState(for: session.id)
                 flowStepRow(
                     title: "今朝の気分",
                     detail: session.mood.map { "\($0.emoji) \($0.label)" } ?? "未入力",
@@ -133,15 +183,15 @@ struct HomeView: View {
                 )
                 flowStepRow(
                     title: "朝の点字テスト",
-                    detail: testResult.map { $0.wasSkipped ? "スキップ済み" : "完了" } ?? "これから",
+                    detail: testState.detail,
                     systemImage: "checkmark.circle",
-                    isComplete: testResult != nil
+                    isComplete: testState.isComplete
                 )
                 flowStepRow(
                     title: "記録を確認",
-                    detail: session.mood != nil && testResult != nil ? "準備できました" : "最後のステップ",
+                    detail: session.mood != nil && testState.isComplete ? "準備できました" : "最後のステップ",
                     systemImage: "chart.bar.xaxis",
-                    isComplete: session.mood != nil && testResult != nil
+                    isComplete: session.mood != nil && testState.isComplete
                 )
 
                 Button(action: continueMorningFlow) {
@@ -182,7 +232,10 @@ struct HomeView: View {
             }
         } header: {
             Text(dailyFlowPeriod.title)
-                .accessibilityLabel("\(dailyFlowPeriod.title)、\(dailyFlowPeriod.accessibilityTimeRange)")
+                .accessibilityLabel(
+                    "\(dailyFlowPeriod.title)、"
+                        + dailyFlowPeriod.accessibilityTimeRange(schedule: dailyFlowSchedule)
+                )
         } footer: {
             Text(dailyFlowFooterText)
         }
@@ -200,7 +253,11 @@ struct HomeView: View {
 
     @ViewBuilder
     private var nightFlowContent: some View {
-        let journalDay = DailyFlowPeriod.nightFlowDay(containing: now, calendar: calendar)
+        let journalDay = DailyFlowPeriod.nightFlowDay(
+            containing: now,
+            calendar: calendar,
+            schedule: dailyFlowSchedule
+        )
         let journalComplete = eveningStore.entry(for: journalDay, calendar: calendar)?.completedAt != nil
 
         flowStepRow(
@@ -226,7 +283,7 @@ struct HomeView: View {
             if sleepStore.activeTimerStartedAt != nil {
                 selectedTab = .sleep
             } else if journalComplete {
-                onOpenLearning(.study, nil)
+                onOpenLearning()
             } else {
                 onStartEveningFlow()
             }
@@ -442,8 +499,6 @@ struct HomeView: View {
         guard let session = morningFlowSession else { return }
         if session.mood == nil {
             onResumeReflection(session.id)
-        } else if morningTestResult(for: session.id) == nil {
-            onOpenLearning(.test, session.id)
         } else {
             selectedTab = .history
         }
@@ -451,8 +506,21 @@ struct HomeView: View {
 
     private func morningActionTitle(for session: SleepSession) -> String {
         if session.mood == nil { return "今朝の気分を記録" }
-        if morningTestResult(for: session.id) == nil { return "朝テストへ" }
         return "記録を見る"
+    }
+
+    private func morningTestState(for sessionID: UUID) -> (detail: String, isComplete: Bool) {
+        if let resultID = morningFlowProgress?.morningTestResultID,
+           let result = learningStore.results.first(where: { $0.id == resultID }) {
+            return (result.wasSkipped ? "スキップ済み" : "完了", true)
+        }
+        if let result = morningTestResult(for: sessionID) {
+            return (result.wasSkipped ? "スキップ済み" : "完了", true)
+        }
+        if morningFlowProgress?.morningTestCompletedAt != nil {
+            return ("完了", true)
+        }
+        return ("これから", false)
     }
 
     private func flowStepRow(
@@ -497,4 +565,5 @@ struct HomeView: View {
     .environmentObject(SleepStore())
     .environmentObject(SleepLearningStore())
     .environmentObject(EveningStore())
+    .environmentObject(MandatoryDailyFlowStore())
 }

@@ -18,17 +18,25 @@ struct MainView: View {
         let id: UUID
     }
 
+    private struct FlowClockTaskID: Hashable {
+        let isActive: Bool
+        let morningStartMinutes: Int
+        let nightStartMinutes: Int
+    }
+
     @EnvironmentObject private var sleepStore: SleepStore
     @EnvironmentObject private var eveningStore: EveningStore
     @Environment(\.scenePhase) private var scenePhase
     @Binding var user: AppUser?
+    @AppStorage(DailyFlowSchedule.morningStartDefaultsKey)
+    private var morningStartMinutes = DailyFlowSchedule.defaultMorningStartMinutes
+    @AppStorage(DailyFlowSchedule.nightStartDefaultsKey)
+    private var nightStartMinutes = DailyFlowSchedule.defaultNightStartMinutes
     @State private var selectedTab: MainTab = .home
     @State private var flowNow = Date()
-    @State private var learningPhase: SleepLearningPhase = .study
     @State private var isSettingsPresented = false
     @State private var isEveningJournalPresented = false
     @State private var reflectionTarget: ReflectionTarget?
-    @State private var morningTestSessionID: UUID?
     @State private var shouldRouteHomeOnActivation = false
 
     var body: some View {
@@ -45,7 +53,9 @@ struct MainView: View {
                         onResumeReflection: { sessionID in
                             reflectionTarget = ReflectionTarget(id: sessionID)
                         },
-                        onOpenLearning: openLearning,
+                        onOpenLearning: {
+                            selectedTab = .learning
+                        },
                         onOpenSettings: {
                             isSettingsPresented = true
                         }
@@ -57,20 +67,13 @@ struct MainView: View {
             }
 
             Tab("夜", systemImage: "moon.stars.fill", value: .sleep) {
-                SleepRecorderView(onReflectionSaved: beginMorningTest)
+                SleepRecorderView()
                     .environment(\.isAmbientBackgroundActive, selectedTab == .sleep)
             }
 
             Tab("学習", systemImage: "book.fill", value: .learning) {
-                SleepLearningView(
-                    phase: $learningPhase,
-                    targetSleepSessionID: activeMorningTestSessionID,
-                    onContinueToSleep: {
-                        selectedTab = .sleep
-                    },
-                    onOpenHistory: finishMorningFlow
-                )
-                .environment(\.isAmbientBackgroundActive, selectedTab == .learning)
+                SleepLearningView()
+                    .environment(\.isAmbientBackgroundActive, selectedTab == .learning)
             }
 
             Tab("記録", systemImage: "chart.bar.xaxis", value: .history) {
@@ -97,15 +100,10 @@ struct MainView: View {
         .tabViewStyle(.sidebarAdaptable)
         .tabBarMinimizeBehavior(.onScrollDown)
         .preferredColorScheme(ambientScene.isNight ? ColorScheme.dark : nil)
-        .onChange(of: learningPhase) { _, newPhase in
-            if newPhase == .test, morningTestSessionID == nil {
-                morningTestSessionID = latestTodaySessionID
-            }
-        }
         .onChange(of: scenePhase) { _, newPhase in
             handleScenePhaseChange(newPhase)
         }
-        .task(id: scenePhase) {
+        .task(id: flowClockTaskID) {
             await keepClockCurrentWhileActive()
         }
         .sheet(isPresented: $isSettingsPresented) {
@@ -123,67 +121,45 @@ struct MainView: View {
         }
         .sheet(isPresented: $isEveningJournalPresented) {
             EveningJournalView(day: nightFlowDay) {
-                learningPhase = .study
-                morningTestSessionID = nil
                 selectedTab = .learning
             }
             .environmentObject(eveningStore)
         }
         .sheet(item: $reflectionTarget) { target in
-            MorningReflectionView(
-                sessionID: target.id,
-                onSaved: beginMorningTest
-            )
+            MorningReflectionView(sessionID: target.id)
             .environmentObject(sleepStore)
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
     }
 
-    private func openLearning(
-        _ phase: SleepLearningPhase,
-        sleepSessionID: UUID?
-    ) {
-        learningPhase = phase
-        morningTestSessionID = phase == .test ? sleepSessionID : nil
-        selectedTab = .learning
-    }
-
-    private var activeMorningTestSessionID: UUID? {
-        guard let morningTestSessionID,
-              sleepStore.sessions.contains(where: { $0.id == morningTestSessionID }) else {
-            return nil
-        }
-        return morningTestSessionID
-    }
-
-    private var latestTodaySessionID: UUID? {
-        let calendar = Calendar.current
-        return sleepStore.sessions
-            .filter { calendar.isDate($0.wakeDay, inSameDayAs: flowNow) }
-            .max(by: { $0.endDate < $1.endDate })?
-            .id
-    }
-
-    private func beginMorningTest(for sessionID: UUID) {
-        morningTestSessionID = sessionID
-        reflectionTarget = nil
-        learningPhase = .test
-        selectedTab = .learning
-    }
-
-    private func finishMorningFlow() {
-        morningTestSessionID = nil
-        learningPhase = .study
-        selectedTab = .history
-    }
-
     private var ambientScene: AmbientScene {
-        AmbientScene.timeFallback(at: flowNow)
+        AmbientScene.timeFallback(
+            at: flowNow,
+            schedule: dailyFlowSchedule
+        )
     }
 
     private var nightFlowDay: Date {
-        DailyFlowPeriod.nightFlowDay(containing: flowNow)
+        DailyFlowPeriod.nightFlowDay(
+            containing: flowNow,
+            schedule: dailyFlowSchedule
+        )
+    }
+
+    private var dailyFlowSchedule: DailyFlowSchedule {
+        DailyFlowSchedule(
+            morningStartMinutes: morningStartMinutes,
+            nightStartMinutes: nightStartMinutes
+        )
+    }
+
+    private var flowClockTaskID: FlowClockTaskID {
+        FlowClockTaskID(
+            isActive: scenePhase == .active,
+            morningStartMinutes: morningStartMinutes,
+            nightStartMinutes: nightStartMinutes
+        )
     }
 
     private func handleScenePhaseChange(_ newPhase: ScenePhase) {
@@ -220,11 +196,28 @@ struct MainView: View {
     }
 
     private func nextClockUpdate(after date: Date, calendar: Calendar) -> Date {
-        [0, 5, 9, 11, 17, 19]
-            .compactMap { hour in
+        let morningSceneEnd = (
+            dailyFlowSchedule.morningStartMinutes + 4 * 60
+        ) % (24 * 60)
+        let transitionMinutes = Set([
+            0,
+            9 * 60,
+            11 * 60,
+            17 * 60,
+            dailyFlowSchedule.morningStartMinutes,
+            dailyFlowSchedule.nightStartMinutes,
+            morningSceneEnd
+        ])
+
+        return transitionMinutes
+            .compactMap { minute in
                 calendar.nextDate(
                     after: date,
-                    matching: DateComponents(hour: hour, minute: 0, second: 0),
+                    matching: DateComponents(
+                        hour: minute / 60,
+                        minute: minute % 60,
+                        second: 0
+                    ),
                     matchingPolicy: .nextTime
                 )
             }

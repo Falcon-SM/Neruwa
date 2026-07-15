@@ -299,6 +299,17 @@ public final class SleepStore: ObservableObject {
         }
     }
 
+    /// Reads HealthKit's State of Mind for a selected day without mutating the
+    /// app's own reflection. The HealthKit value is richer than `SleepMood`, so
+    /// History presents both sources instead of silently reducing or overwriting it.
+    public func healthKitStateOfMind(
+        for day: Date,
+        calendar: Calendar = .current
+    ) async throws -> [HealthKitStateOfMindData] {
+        try await healthKitManager.requestStateOfMindAuthorization()
+        return try await healthKitManager.fetchStateOfMind(for: day, calendar: calendar)
+    }
+
     public func connectFirestore(userID: String) async {
         errorMessage = nil
         let normalizedUserID = userID.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -44,6 +44,7 @@ struct MandatoryDailyFlowProgress: Codable, Equatable, Sendable {
     var pendingMood: SleepMood?
     var pendingNote: String
     var morningTestCompletedAt: Date?
+    var morningTestResultID: UUID?
     var updatedAt: Date
     var completedAt: Date?
 
@@ -53,6 +54,7 @@ struct MandatoryDailyFlowProgress: Codable, Equatable, Sendable {
         pendingMood: SleepMood? = nil,
         pendingNote: String = "",
         morningTestCompletedAt: Date? = nil,
+        morningTestResultID: UUID? = nil,
         updatedAt: Date = Date(),
         completedAt: Date? = nil
     ) {
@@ -61,6 +63,7 @@ struct MandatoryDailyFlowProgress: Codable, Equatable, Sendable {
         self.pendingMood = pendingMood
         self.pendingNote = pendingNote
         self.morningTestCompletedAt = morningTestCompletedAt
+        self.morningTestResultID = morningTestResultID
         self.updatedAt = updatedAt
         self.completedAt = completedAt
     }
@@ -71,28 +74,59 @@ struct MandatoryDailyFlowContext: Identifiable, Equatable, Sendable {
     let period: DailyFlowPeriod
     let targetDay: Date
     let flowID: String
+    let schedule: DailyFlowSchedule
 
     init(
         profileID: String,
         now: Date = Date(),
-        calendar: Calendar = .current
+        calendar: Calendar = .current,
+        schedule: DailyFlowSchedule = .default
     ) {
         self.profileID = profileID
-        self.period = DailyFlowPeriod(date: now, calendar: calendar)
+        self.schedule = schedule
+        self.period = DailyFlowPeriod(
+            date: now,
+            calendar: calendar,
+            schedule: schedule
+        )
         let resolvedTargetDay: Date
         switch period {
         case .morning:
-            resolvedTargetDay = calendar.startOfDay(for: now)
+            resolvedTargetDay = DailyFlowPeriod.morningFlowDay(
+                containing: now,
+                calendar: calendar,
+                schedule: schedule
+            )
         case .night:
             resolvedTargetDay = DailyFlowPeriod.nightFlowDay(
                 containing: now,
-                calendar: calendar
+                calendar: calendar,
+                schedule: schedule
             )
         }
         self.targetDay = resolvedTargetDay
         self.flowID = MandatoryDailyFlowStore.flowID(
             period: period,
             targetDay: resolvedTargetDay,
+            calendar: calendar
+        )
+    }
+
+    init(
+        profileID: String,
+        period: DailyFlowPeriod,
+        targetDay: Date,
+        calendar: Calendar = .current,
+        schedule: DailyFlowSchedule = .default
+    ) {
+        let normalizedDay = calendar.startOfDay(for: targetDay)
+        self.profileID = profileID
+        self.period = period
+        self.targetDay = normalizedDay
+        self.schedule = schedule
+        self.flowID = MandatoryDailyFlowStore.flowID(
+            period: period,
+            targetDay: normalizedDay,
             calendar: calendar
         )
     }
@@ -210,10 +244,14 @@ final class MandatoryDailyFlowStore: ObservableObject {
         persist()
     }
 
-    func markMorningTestCompleted(_ context: MandatoryDailyFlowContext) {
+    func markMorningTestCompleted(
+        _ context: MandatoryDailyFlowContext,
+        resultID: UUID
+    ) {
         guard var progress = progress(for: context) else { return }
         let completedAt = Date()
         progress.morningTestCompletedAt = completedAt
+        progress.morningTestResultID = resultID
         progress.updatedAt = completedAt
         progressByFlowID[context.flowID] = progress
         persist()
@@ -329,7 +367,13 @@ fileprivate extension MandatoryDailyFlowStore {
             components.month ?? 0,
             components.day ?? 0
         )
-        let periodKey = period == .morning ? "morning" : "night"
+        let periodKey: String
+        switch period {
+        case .morning:
+            periodKey = "morning"
+        case .night:
+            periodKey = "night"
+        }
         return "\(periodKey).\(dateKey)"
     }
 }

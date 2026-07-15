@@ -11,6 +11,12 @@ struct SettingsView: View {
     @Binding var user: AppUser
 
     @AppStorage("sleepTargetMinutes") private var targetMinutes = 480
+    @AppStorage(DailyFlowSchedule.morningStartDefaultsKey)
+    private var morningStartMinutes = DailyFlowSchedule.defaultMorningStartMinutes
+    @AppStorage(DailyFlowSchedule.nightStartDefaultsKey)
+    private var nightStartMinutes = DailyFlowSchedule.defaultNightStartMinutes
+    @AppStorage(SleepFeedVisibility.defaultsKey)
+    private var defaultShareVisibilityRaw = SleepFeedVisibility.everyone.rawValue
 
     @State private var isImportingHealthKit = false
     @State private var showsLogoutConfirmation = false
@@ -24,6 +30,8 @@ struct SettingsView: View {
             Form {
                 profileSection
                 sleepGoalSection
+                dailyFlowTimeSection
+                sharingSection
                 healthSection
                 dataSection
                 accountSection
@@ -55,6 +63,12 @@ struct SettingsView: View {
                 }
             } message: {
                 Text("このプロフィールの夜の日記\(eveningStore.entries.count)件を端末から削除します。睡眠記録は削除されません。元に戻せません。")
+            }
+            .onAppear {
+                normalizePersistedPreferences()
+            }
+            .onDisappear {
+                normalizeDailyFlowTimes()
             }
         }
     }
@@ -123,10 +137,84 @@ struct SettingsView: View {
         }
     }
 
+    private var dailyFlowTimeSection: some View {
+        Section {
+            DatePicker(
+                "朝の流れを始める",
+                selection: minuteBinding(
+                    get: { morningStartMinutes },
+                    set: { morningStartMinutes = $0 }
+                ),
+                displayedComponents: .hourAndMinute
+            )
+            .datePickerStyle(.compact)
+
+            DatePicker(
+                "夜の流れを始める",
+                selection: minuteBinding(
+                    get: { nightStartMinutes },
+                    set: { nightStartMinutes = $0 }
+                ),
+                displayedComponents: .hourAndMinute
+            )
+            .datePickerStyle(.compact)
+
+            if !DailyFlowSchedule.isValid(
+                morningStartMinutes: morningStartMinutes,
+                nightStartMinutes: nightStartMinutes
+            ) {
+                Label("朝と夜は異なる時刻にしてください", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+            }
+
+            if morningStartMinutes != DailyFlowSchedule.defaultMorningStartMinutes
+                || nightStartMinutes != DailyFlowSchedule.defaultNightStartMinutes {
+                Button("05:00 / 19:00に戻す") {
+                    morningStartMinutes = DailyFlowSchedule.defaultMorningStartMinutes
+                    nightStartMinutes = DailyFlowSchedule.defaultNightStartMinutes
+                }
+            }
+        } header: {
+            Text("朝と夜の切り替え")
+        } footer: {
+            Text(
+                "朝は\(dailyFlowSchedule.formattedMorningStart)から、夜は"
+                    + "\(dailyFlowSchedule.formattedNightStart)から始まります。"
+                    + "同じ時刻や保存データが不正な場合は05:00 / 19:00を使います。"
+            )
+        }
+    }
+
+    private var sharingSection: some View {
+        Section {
+            Picker("投稿時の初期設定", selection: defaultShareVisibilityBinding) {
+                ForEach(SleepFeedVisibility.allCases) { visibility in
+                    Label(visibility.title, systemImage: visibility.systemImage)
+                        .tag(visibility)
+                }
+            }
+
+            LabeledContent {
+                Text("準備中")
+                    .foregroundStyle(.secondary)
+            } label: {
+                Label("友達限定", systemImage: "person.2.badge.gearshape")
+            }
+            .foregroundStyle(.secondary)
+        } header: {
+            Text("睡眠の共有")
+        } footer: {
+            Text(
+                "「みんな」はログイン済みのテスト参加者全員への公開です。"
+                    + "友達の招待・限定公開はまだ実装していません。投稿画面で毎回変更できます。"
+            )
+        }
+    }
+
     private var healthSection: some View {
         Section {
             Label {
-                Text("Apple Watchや対応アプリが記録した昨晩の睡眠を読み取ります。Neruwaからヘルスケアへ書き込むことはありません。")
+                Text("Apple Watchや対応アプリが記録した昨晩の睡眠を読み取ります。記録画面では、許可した場合だけ選択日の心の状態も表示します。Neruwaからヘルスケアへ書き込むことはありません。")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } icon: {
@@ -222,6 +310,64 @@ struct SettingsView: View {
         defer { isImportingHealthKit = false }
 
         _ = await sleepStore.importLastNightFromHealthKit(targetMinutes: targetMinutes)
+    }
+
+    private var dailyFlowSchedule: DailyFlowSchedule {
+        DailyFlowSchedule(
+            morningStartMinutes: morningStartMinutes,
+            nightStartMinutes: nightStartMinutes
+        )
+    }
+
+    private var defaultShareVisibilityBinding: Binding<SleepFeedVisibility> {
+        Binding(
+            get: {
+                SleepFeedVisibility(rawValue: defaultShareVisibilityRaw) ?? .everyone
+            },
+            set: { defaultShareVisibilityRaw = $0.rawValue }
+        )
+    }
+
+    private func minuteBinding(
+        get: @escaping () -> Int,
+        set: @escaping (Int) -> Void
+    ) -> Binding<Date> {
+        Binding(
+            get: { dateForPicker(minutes: get()) },
+            set: { date in
+                let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+                let minutes = (components.hour ?? 0) * 60 + (components.minute ?? 0)
+                set(minutes)
+            }
+        )
+    }
+
+    private func dateForPicker(minutes: Int) -> Date {
+        let safeMinutes = (0..<(24 * 60)).contains(minutes) ? minutes : 0
+        return Calendar.current.date(
+            bySettingHour: safeMinutes / 60,
+            minute: safeMinutes % 60,
+            second: 0,
+            of: Date()
+        ) ?? Date()
+    }
+
+    private func normalizePersistedPreferences() {
+        normalizeDailyFlowTimes()
+        if SleepFeedVisibility(rawValue: defaultShareVisibilityRaw) == nil {
+            defaultShareVisibilityRaw = SleepFeedVisibility.everyone.rawValue
+        }
+    }
+
+    private func normalizeDailyFlowTimes() {
+        guard DailyFlowSchedule.isValid(
+            morningStartMinutes: morningStartMinutes,
+            nightStartMinutes: nightStartMinutes
+        ) else {
+            morningStartMinutes = DailyFlowSchedule.defaultMorningStartMinutes
+            nightStartMinutes = DailyFlowSchedule.defaultNightStartMinutes
+            return
+        }
     }
 }
 

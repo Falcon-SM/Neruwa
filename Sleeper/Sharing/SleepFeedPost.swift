@@ -1,5 +1,35 @@
 import Foundation
 
+enum SleepFeedVisibility: String, CaseIterable, Identifiable, Hashable, Sendable {
+    case everyone
+    case deviceOnly
+
+    static let defaultsKey = "Neruwa.SleepFeed.defaultVisibility"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .everyone: "みんな"
+        case .deviceOnly: "この端末のみ"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .everyone: "ログイン済みのテスト参加者に公開"
+        case .deviceOnly: "Firestoreへ送信せず、この端末だけに保存"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .everyone: "person.2.fill"
+        case .deviceOnly: "iphone"
+        }
+    }
+}
+
 /// The deliberately small, public representation used by the in-app feed.
 ///
 /// A feed post cannot contain exact bed/wake times, sleep stages, HealthKit

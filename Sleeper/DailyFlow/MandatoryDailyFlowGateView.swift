@@ -5,6 +5,7 @@ struct MandatoryDailyFlowGateView: View {
     @EnvironmentObject private var learningStore: SleepLearningStore
     @EnvironmentObject private var eveningStore: EveningStore
     @EnvironmentObject private var flowStore: MandatoryDailyFlowStore
+    @AppStorage("sleepTargetMinutes") private var targetMinutes = 480
 
     let context: MandatoryDailyFlowContext
     let onCompleted: () -> Void
@@ -34,7 +35,9 @@ struct MandatoryDailyFlowGateView: View {
         }
         .environment(
             \.ambientScene,
-            context.period == .night ? .night : AmbientScene.timeFallback()
+            context.period == .night
+                ? .night
+                : AmbientScene.timeFallback(schedule: context.schedule)
         )
         .preferredColorScheme(context.period == .night ? .dark : nil)
         .interactiveDismissDisabled()
@@ -89,8 +92,11 @@ struct MandatoryDailyFlowGateView: View {
                     attachPendingReflectionIfPossible()
                     advance(to: .morningRecord)
                 },
-                onTestCompleted: {
-                    flowStore.markMorningTestCompleted(context)
+                onTestCompleted: { result in
+                    flowStore.markMorningTestCompleted(
+                        context,
+                        resultID: result.id
+                    )
                 }
             )
             .environmentObject(learningStore)
@@ -118,6 +124,7 @@ struct MandatoryDailyFlowGateView: View {
             SleepLearningView(
                 phase: $learningPhase,
                 showsPhaseSelector: false,
+                showsStudyContinuation: true,
                 allowsTestSkipping: false,
                 onContinueToSleep: {
                     advance(to: .nightSleep)
@@ -162,7 +169,14 @@ struct MandatoryDailyFlowGateView: View {
     private var latestMorningSession: SleepSession? {
         sleepStore.sessions
             .filter {
-                calendar.isDate($0.endDate, inSameDayAs: context.targetDay)
+                calendar.isDate(
+                    DailyFlowPeriod.morningFlowDay(
+                        containing: $0.endDate,
+                        calendar: calendar,
+                        schedule: context.schedule
+                    ),
+                    inSameDayAs: context.targetDay
+                )
             }
             .max(by: { $0.endDate < $1.endDate })
     }
@@ -170,6 +184,8 @@ struct MandatoryDailyFlowGateView: View {
     private func initializeFlowIfNeeded() {
         guard !didInitialize else { return }
         didInitialize = true
+
+        finalizeActiveTimerForMorningIfNeeded()
 
         let existing = flowStore.progress(for: context)
         let initial = existing ?? flowStore.ensureProgress(
@@ -186,6 +202,21 @@ struct MandatoryDailyFlowGateView: View {
         currentStep = initial.step
         learningPhase = initial.step == .nightAudio ? .audio : .study
         reconcilePersistedData()
+    }
+
+    /// Opening the app in the morning means the user has woken up. Finalize a
+    /// timer that was started by the preceding night flow before collecting
+    /// mood and test results, so every morning result has a SleepSession.
+    private func finalizeActiveTimerForMorningIfNeeded() {
+        guard context.period == .morning,
+              sleepStore.activeTimerStartedAt != nil else {
+            return
+        }
+
+        _ = sleepStore.stopTimer(
+            targetMinutes: min(max(targetMinutes, 6 * 60), 10 * 60)
+        )
+        learningStore.stopSleepPlayback()
     }
 
     private var preferredInitialStep: MandatoryDailyFlowStep {
@@ -246,43 +277,32 @@ struct MandatoryDailyFlowGateView: View {
 
     private func attachPendingReflectionIfPossible() {
         guard let progress = flowStore.progress(for: context),
-              let mood = progress.pendingMood,
               let session = targetMorningSession else {
             return
         }
 
         flowStore.setTargetSleepSessionID(context, sessionID: session.id)
-        if session.mood == nil {
+        if let mood = progress.pendingMood, session.mood == nil {
             sleepStore.updateReflection(
                 id: session.id,
                 mood: mood,
                 note: progress.pendingNote
             )
         }
+        if let resultID = progress.morningTestResultID {
+            _ = learningStore.linkTestResult(id: resultID, to: session.id)
+        }
     }
 
     private var hasActiveTimerForCurrentNight: Bool {
         guard let startedAt = sleepStore.activeTimerStartedAt,
-              let start = calendar.date(
-                bySettingHour: 19,
-                minute: 0,
-                second: 0,
-                of: context.targetDay
-              ),
-              let nextDay = calendar.date(
-                byAdding: .day,
-                value: 1,
-                to: context.targetDay
-              ),
-              let end = calendar.date(
-                bySettingHour: 5,
-                minute: 0,
-                second: 0,
-                of: nextDay
+              let interval = context.schedule.nightInterval(
+                forFlowDay: context.targetDay,
+                calendar: calendar
               ) else {
             return false
         }
-        return startedAt >= start && startedAt < end
+        return startedAt >= interval.start && startedAt < interval.end
     }
 
     private func advance(
@@ -373,11 +393,13 @@ private struct MandatoryMorningMoodView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 Section {
-                    Text("昨夜の睡眠記録がまだなくても、今の気分は今日の流れに保存されます。")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    ContentUnavailableView {
+                        Label("睡眠記録はあとで追加", systemImage: "clock.badge.questionmark")
+                    } description: {
+                        Text("まずは今の気分を保存します。睡眠記録が追加されたら自動で結び付けます。")
+                    }
                 }
 
                 Section("今朝の気分") {
@@ -389,8 +411,7 @@ private struct MandatoryMorningMoodView: View {
                                 .tag(Optional(mood))
                         }
                     }
-                    .pickerStyle(.inline)
-                    .labelsHidden()
+                    .pickerStyle(.navigationLink)
                 }
 
                 Section {
@@ -412,27 +433,20 @@ private struct MandatoryMorningMoodView: View {
                     }
                 }
 
-                Section {
-                    Button {
-                        guard let selectedMood else { return }
-                        onSaved(
-                            selectedMood,
-                            note.trimmingCharacters(in: .whitespacesAndNewlines)
-                        )
-                    } label: {
-                        Label("保存して点字テストへ", systemImage: "arrow.right.circle.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(selectedMood == nil)
-                }
             }
+            .listStyle(.insetGrouped)
             .scrollDismissesKeyboard(.interactively)
             .scrollContentBackground(.hidden)
             .ambientScreenBackground()
-            .navigationTitle("今朝の気分")
+            .navigationTitle("今日の気分")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("次へ", action: saveMood)
+                        .fontWeight(.semibold)
+                        .disabled(selectedMood == nil)
+                }
+
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
                     Button("完了") {
@@ -446,6 +460,14 @@ private struct MandatoryMorningMoodView: View {
                 note = String(newValue.prefix(noteLimit))
             }
         }
+    }
+
+    private func saveMood() {
+        guard let selectedMood else { return }
+        onSaved(
+            selectedMood,
+            note.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
     }
 }
 

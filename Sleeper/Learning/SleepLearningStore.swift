@@ -308,6 +308,23 @@ public final class SleepLearningStore: NSObject, ObservableObject {
         persistLocally()
     }
 
+    @discardableResult
+    public func linkTestResult(id: UUID, to sleepSessionID: UUID) -> Bool {
+        guard let index = results.firstIndex(where: { $0.id == id }) else {
+            return false
+        }
+        if results[index].sleepSessionID == sleepSessionID {
+            return true
+        }
+        guard results[index].sleepSessionID == nil else {
+            return false
+        }
+
+        results[index].sleepSessionID = sleepSessionID
+        persistLocally()
+        return true
+    }
+
     public func startSleepPlayback() {
         errorMessage = nil
         guard !isPlaying else {

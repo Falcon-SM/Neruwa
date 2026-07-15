@@ -9,6 +9,10 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage(DailyFlowSchedule.morningStartDefaultsKey)
+    private var morningStartMinutes = DailyFlowSchedule.defaultMorningStartMinutes
+    @AppStorage(DailyFlowSchedule.nightStartDefaultsKey)
+    private var nightStartMinutes = DailyFlowSchedule.defaultNightStartMinutes
     @State private var user: AppUser?
     @State private var isRestoringSession = true
     @State private var mandatoryFlowContext: MandatoryDailyFlowContext?
@@ -41,11 +45,22 @@ struct ContentView: View {
         }
         .task(id: user) {
             refreshMandatoryFlow(for: user)
+            reconcilePendingMorningFlow(for: user)
             await synchronizeSleepStore(for: user)
+            reconcilePendingMorningFlow(for: user)
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
             refreshMandatoryFlow(for: user)
+        }
+        .onChange(of: morningStartMinutes) { _, _ in
+            refreshMandatoryFlow(for: user)
+        }
+        .onChange(of: nightStartMinutes) { _, _ in
+            refreshMandatoryFlow(for: user)
+        }
+        .onChange(of: sleepStore.sessions.map(\.id)) { _, _ in
+            reconcilePendingMorningFlow(for: user)
         }
         .fullScreenCover(item: $mandatoryFlowContext) { context in
             MandatoryDailyFlowGateView(context: context) {
@@ -153,11 +168,67 @@ struct ContentView: View {
         mandatoryFlowStore.activateProfile(user.id)
         let context = MandatoryDailyFlowContext(
             profileID: user.id,
-            now: now
+            now: now,
+            schedule: dailyFlowSchedule
         )
         mandatoryFlowContext = mandatoryFlowStore.isCompleted(context)
             ? nil
             : context
+    }
+
+    private var dailyFlowSchedule: DailyFlowSchedule {
+        DailyFlowSchedule(
+            morningStartMinutes: morningStartMinutes,
+            nightStartMinutes: nightStartMinutes
+        )
+    }
+
+    private func reconcilePendingMorningFlow(for user: AppUser?) {
+        guard let user else { return }
+
+        let calendar = Calendar.current
+        let sessionsByMorningFlowDay = Dictionary(grouping: sleepStore.sessions) {
+            DailyFlowPeriod.morningFlowDay(
+                containing: $0.endDate,
+                calendar: calendar,
+                schedule: dailyFlowSchedule
+            )
+        }
+
+        for (flowDay, sessions) in sessionsByMorningFlowDay {
+            let context = MandatoryDailyFlowContext(
+                profileID: user.id,
+                period: .morning,
+                targetDay: flowDay,
+                calendar: calendar,
+                schedule: dailyFlowSchedule
+            )
+            guard let progress = mandatoryFlowStore.progress(for: context),
+                  progress.pendingMood != nil || progress.morningTestResultID != nil else {
+                continue
+            }
+
+            let existingTarget = progress.targetSleepSessionID.flatMap {
+                sleepStore.session(id: $0)
+            }
+            guard let session = existingTarget ?? sessions.max(by: { $0.endDate < $1.endDate }) else {
+                continue
+            }
+
+            if progress.targetSleepSessionID != session.id {
+                mandatoryFlowStore.setTargetSleepSessionID(context, sessionID: session.id)
+            }
+            if let mood = progress.pendingMood, session.mood == nil {
+                sleepStore.updateReflection(
+                    id: session.id,
+                    mood: mood,
+                    note: progress.pendingNote
+                )
+            }
+            if let resultID = progress.morningTestResultID {
+                _ = learningStore.linkTestResult(id: resultID, to: session.id)
+            }
+        }
     }
 }
 
