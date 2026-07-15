@@ -52,6 +52,11 @@ struct SleepRecorderView: View {
     private let minimumTarget = 6 * 60
     private let maximumTarget = 10 * 60
     private let targetStep = 15
+    private let onReflectionSaved: ((UUID) -> Void)?
+
+    init(onReflectionSaved: ((UUID) -> Void)? = nil) {
+        self.onReflectionSaved = onReflectionSaved
+    }
 
     var body: some View {
         NavigationStack {
@@ -102,7 +107,7 @@ struct SleepRecorderView: View {
             .contentMargins(.horizontal, 20, for: .scrollContent)
             .scrollDismissesKeyboard(.interactively)
             .scrollBounceBehavior(.basedOnSize)
-            .background(Color(uiColor: .systemBackground))
+            .ambientScreenBackground()
             .navigationTitle("睡眠")
             .navigationBarTitleDisplayMode(.large)
         }
@@ -124,7 +129,10 @@ struct SleepRecorderView: View {
             await refreshRunningTimer(for: timerRefreshKey)
         }
         .sheet(item: $reflectionTarget) { target in
-            MorningReflectionView(sessionID: target.id)
+            MorningReflectionView(
+                sessionID: target.id,
+                onSaved: onReflectionSaved
+            )
                 .environmentObject(sleepStore)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)

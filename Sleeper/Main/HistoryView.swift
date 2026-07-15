@@ -202,8 +202,8 @@ struct HistoryView: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .scrollContentBackground(.automatic)
-            .background(Color(uiColor: .systemGroupedBackground))
+            .scrollContentBackground(.hidden)
+            .ambientScreenBackground()
             .navigationTitle("睡眠の振り返り")
             .navigationBarTitleDisplayMode(.large)
         }

@@ -269,10 +269,12 @@ public final class SleepLearningStore: NSObject, ObservableObject {
     @discardableResult
     public func saveTestResult(
         correctAnswers: Int,
-        totalQuestions: Int
+        totalQuestions: Int,
+        sleepSessionID: UUID? = nil,
+        wasSkipped: Bool = false
     ) -> LearningTestResult? {
         errorMessage = nil
-        guard totalQuestions > 0 else {
+        guard wasSkipped || totalQuestions > 0 else {
             errorMessage = "テストの問題数を確認できませんでした。"
             return nil
         }
@@ -280,13 +282,17 @@ public final class SleepLearningStore: NSObject, ObservableObject {
         let result = LearningTestResult(
             correctAnswers: correctAnswers,
             totalQuestions: totalQuestions,
-            cardIDs: settings.selectedCardIDs
+            cardIDs: settings.selectedCardIDs,
+            sleepSessionID: sleepSessionID,
+            wasSkipped: wasSkipped
         )
         results.insert(result, at: 0)
         if results.count > Self.maximumStoredResults {
             results.removeLast(results.count - Self.maximumStoredResults)
         }
-        statusMessage = "学習テストの結果を保存しました。"
+        statusMessage = wasSkipped
+            ? "朝のテストをスキップしました。"
+            : "学習テストの結果を保存しました。"
         persistLocally()
         return result
     }
@@ -468,7 +474,9 @@ private extension SleepLearningStore {
                     completedAt: $0.completedAt,
                     correctAnswers: $0.correctAnswers,
                     totalQuestions: $0.totalQuestions,
-                    cardIDs: $0.cardIDs.intersection(availableIDs)
+                    cardIDs: $0.cardIDs.intersection(availableIDs),
+                    sleepSessionID: $0.sleepSessionID,
+                    wasSkipped: $0.wasSkipped
                 )
             }
             .sorted { $0.completedAt > $1.completedAt }

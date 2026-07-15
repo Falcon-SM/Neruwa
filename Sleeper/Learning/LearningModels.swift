@@ -43,20 +43,51 @@ public struct LearningTestResult: Identifiable, Codable, Hashable, Sendable {
     public var correctAnswers: Int
     public var totalQuestions: Int
     public var cardIDs: Set<UUID>
+    /// The sleep record whose morning flow produced this result.
+    /// Results saved before this field was introduced remain unlinked.
+    public var sleepSessionID: UUID?
+    public var wasSkipped: Bool
 
     public init(
         id: UUID = UUID(),
         completedAt: Date = Date(),
         correctAnswers: Int,
         totalQuestions: Int,
-        cardIDs: Set<UUID> = []
+        cardIDs: Set<UUID> = [],
+        sleepSessionID: UUID? = nil,
+        wasSkipped: Bool = false
     ) {
         let normalizedTotal = max(0, totalQuestions)
         self.id = id
         self.completedAt = completedAt
-        self.correctAnswers = min(max(0, correctAnswers), normalizedTotal)
-        self.totalQuestions = normalizedTotal
+        self.correctAnswers = wasSkipped ? 0 : min(max(0, correctAnswers), normalizedTotal)
+        self.totalQuestions = wasSkipped ? 0 : normalizedTotal
         self.cardIDs = cardIDs
+        self.sleepSessionID = sleepSessionID
+        self.wasSkipped = wasSkipped
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case completedAt
+        case correctAnswers
+        case totalQuestions
+        case cardIDs
+        case sleepSessionID
+        case wasSkipped
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try container.decode(UUID.self, forKey: .id),
+            completedAt: try container.decode(Date.self, forKey: .completedAt),
+            correctAnswers: try container.decodeIfPresent(Int.self, forKey: .correctAnswers) ?? 0,
+            totalQuestions: try container.decodeIfPresent(Int.self, forKey: .totalQuestions) ?? 0,
+            cardIDs: try container.decodeIfPresent(Set<UUID>.self, forKey: .cardIDs) ?? [],
+            sleepSessionID: try container.decodeIfPresent(UUID.self, forKey: .sleepSessionID),
+            wasSkipped: try container.decodeIfPresent(Bool.self, forKey: .wasSkipped) ?? false
+        )
     }
 
     /// Accuracy in the range 0...1.

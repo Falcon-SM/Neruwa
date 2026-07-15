@@ -12,13 +12,55 @@ struct HomeView: View {
     }
 
     @EnvironmentObject private var sleepStore: SleepStore
+    @EnvironmentObject private var learningStore: SleepLearningStore
+    @EnvironmentObject private var eveningStore: EveningStore
     @Binding var user: AppUser
     @Binding var selectedTab: MainTab
 
+    private let onStartEveningFlow: () -> Void
+    private let onResumeReflection: (UUID) -> Void
+    private let onOpenLearning: (SleepLearningPhase, UUID?) -> Void
+    private let onOpenSettings: () -> Void
+
     @AppStorage("sleepTargetMinutes") private var targetMinutes = 480
+
+    init(
+        user: Binding<AppUser>,
+        selectedTab: Binding<MainTab>,
+        onStartEveningFlow: @escaping () -> Void = {},
+        onResumeReflection: @escaping (UUID) -> Void = { _ in },
+        onOpenLearning: @escaping (SleepLearningPhase, UUID?) -> Void = { _, _ in },
+        onOpenSettings: @escaping () -> Void = {}
+    ) {
+        _user = user
+        _selectedTab = selectedTab
+        self.onStartEveningFlow = onStartEveningFlow
+        self.onResumeReflection = onResumeReflection
+        self.onOpenLearning = onOpenLearning
+        self.onOpenSettings = onOpenSettings
+    }
 
     private var latestSession: SleepSession? {
         sleepStore.sessions.max(by: { $0.endDate < $1.endDate })
+    }
+
+    private var latestTodaySession: SleepSession? {
+        sleepStore.sessions
+            .filter { Calendar.current.isDateInToday($0.wakeDay) }
+            .max(by: { $0.endDate < $1.endDate })
+    }
+
+    private var morningFlowSession: SleepSession? {
+        let hour = Calendar.current.component(.hour, from: .now)
+        guard hour < 17 else { return nil }
+        guard let session = latestTodaySession else { return nil }
+        return session
+    }
+
+    private func morningTestResult(for sessionID: UUID) -> LearningTestResult? {
+        learningStore.results
+            .filter { $0.sleepSessionID == sessionID }
+            .max(by: { $0.completedAt < $1.completedAt })
     }
 
     private var weeklySummary: WeeklySummary {
@@ -45,13 +87,103 @@ struct HomeView: View {
         NavigationStack {
             List {
                 welcomeSection
+                dailyFlowSection
                 tonightSection
                 recentSleepSection
                 weeklySection
             }
             .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .ambientScreenBackground()
             .navigationTitle("概要")
             .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: onOpenSettings) {
+                        Label("設定", systemImage: "gearshape")
+                    }
+                }
+            }
+        }
+    }
+
+    private var dailyFlowSection: some View {
+        Section {
+            if let session = morningFlowSession {
+                let testResult = morningTestResult(for: session.id)
+                flowStepRow(
+                    title: "今朝の気分",
+                    detail: session.mood.map { "\($0.emoji) \($0.label)" } ?? "未入力",
+                    systemImage: "face.smiling",
+                    isComplete: session.mood != nil
+                )
+                flowStepRow(
+                    title: "朝の点字テスト",
+                    detail: testResult.map { $0.wasSkipped ? "スキップ済み" : "完了" } ?? "これから",
+                    systemImage: "checkmark.circle",
+                    isComplete: testResult != nil
+                )
+                flowStepRow(
+                    title: "記録を確認",
+                    detail: session.mood != nil && testResult != nil ? "準備できました" : "最後のステップ",
+                    systemImage: "chart.bar.xaxis",
+                    isComplete: session.mood != nil && testResult != nil
+                )
+
+                Button(action: continueMorningFlow) {
+                    Label(morningActionTitle(for: session), systemImage: "arrow.right.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+            } else {
+                let journalComplete = eveningStore.entry(for: .now)?.completedAt != nil
+
+                flowStepRow(
+                    title: "今日を閉じる",
+                    detail: journalComplete ? "日記を保存済み" : "今日・手放す・明日の3つ",
+                    systemImage: "square.and.pencil",
+                    isComplete: journalComplete
+                )
+                flowStepRow(
+                    title: "点字を学ぶ",
+                    detail: "カードと睡眠音声",
+                    systemImage: "book.fill",
+                    isComplete: false
+                )
+                flowStepRow(
+                    title: "睡眠を記録",
+                    detail: sleepStore.activeTimerStartedAt == nil ? "タイマーまたは手入力" : "タイマー計測中",
+                    systemImage: "moon.zzz.fill",
+                    isComplete: sleepStore.activeTimerStartedAt != nil
+                )
+
+                Button {
+                    if sleepStore.activeTimerStartedAt != nil {
+                        selectedTab = .sleep
+                    } else if journalComplete {
+                        onOpenLearning(.study, nil)
+                    } else {
+                        onStartEveningFlow()
+                    }
+                } label: {
+                    Label(
+                        sleepStore.activeTimerStartedAt != nil
+                            ? "睡眠タイマーを確認"
+                            : (journalComplete ? "点字学習へ" : "今日を閉じる"),
+                        systemImage: "arrow.right.circle.fill"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+            }
+        } header: {
+            Text(morningFlowSession == nil ? "夜の流れ" : "朝の流れ")
+        } footer: {
+            Text(morningFlowSession == nil
+                 ? "日記 → 学ぶ → 睡眠音声 → 睡眠記録の順で進めます。"
+                 : "気分 → 朝テスト → 記録の順で進めます。")
         }
     }
 
@@ -246,6 +378,56 @@ struct HomeView: View {
         case .healthKit: "ヘルスケア"
         }
     }
+
+    private func continueMorningFlow() {
+        guard let session = morningFlowSession else { return }
+        if session.mood == nil {
+            onResumeReflection(session.id)
+        } else if morningTestResult(for: session.id) == nil {
+            onOpenLearning(.test, session.id)
+        } else {
+            selectedTab = .history
+        }
+    }
+
+    private func morningActionTitle(for session: SleepSession) -> String {
+        if session.mood == nil { return "今朝の気分を記録" }
+        if morningTestResult(for: session.id) == nil { return "朝テストへ" }
+        return "記録を見る"
+    }
+
+    private func flowStepRow(
+        title: String,
+        detail: String,
+        systemImage: String,
+        isComplete: Bool
+    ) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.tint)
+                .frame(width: 24)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.body)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 8)
+
+            Image(systemName: isComplete ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(isComplete ? Color.green : Color.secondary)
+                .accessibilityHidden(true)
+        }
+        .padding(.vertical, 3)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title)、\(detail)、\(isComplete ? "完了" : "未完了")")
+    }
 }
 
 #Preview {
@@ -254,4 +436,6 @@ struct HomeView: View {
         selectedTab: .constant(.home)
     )
     .environmentObject(SleepStore())
+    .environmentObject(SleepLearningStore())
+    .environmentObject(EveningStore())
 }

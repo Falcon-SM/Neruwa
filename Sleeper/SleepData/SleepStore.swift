@@ -216,6 +216,32 @@ public final class SleepStore: ObservableObject {
         enqueueCloudMutation(.delete(deletion))
     }
 
+    /// Removes all local sessions in one state update and queues tombstones in
+    /// one cloud operation. This keeps large histories from repeatedly encoding
+    /// the complete store on the main actor.
+    public func deleteAll() {
+        errorMessage = nil
+        guard !sessions.isEmpty else { return }
+
+        let removedSessions = sessions
+        sessions = []
+
+        let removedIDs = Set(removedSessions.map(\.id))
+        deletions.removeAll { removedIDs.contains($0.id) }
+        let newDeletions = removedSessions.map { session in
+            SleepDeletionTombstone(
+                id: session.id,
+                updatedAt: timestamp(after: session.updatedAt)
+            )
+        }
+        deletions.append(contentsOf: newDeletions)
+        deletions.sort { $0.updatedAt > $1.updatedAt }
+
+        statusMessage = "すべての睡眠記録を削除しました。"
+        persistLocally()
+        enqueueCloudMutation(.deleteMany(newDeletions))
+    }
+
     @discardableResult
     public func importLastNightFromHealthKit(targetMinutes: Int) async -> SleepSession? {
         errorMessage = nil
@@ -342,6 +368,7 @@ private extension SleepStore {
     enum CloudMutation {
         case upsert(SleepSession)
         case delete(SleepDeletionTombstone)
+        case deleteMany([SleepDeletionTombstone])
     }
 
     struct PersistedState: Codable {
@@ -492,6 +519,8 @@ private extension SleepStore {
                     try await service.upsert(session: session)
                 case .delete(let deletion):
                     try await service.markDeleted(deletion)
+                case .deleteMany(let deletions):
+                    try await service.markDeleted(deletions)
                 }
             } catch {
                 guard self.firestoreService === service else { return }

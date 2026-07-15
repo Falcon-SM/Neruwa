@@ -1,6 +1,6 @@
 import SwiftUI
 
-private enum LearningPhase: String, CaseIterable, Hashable {
+enum SleepLearningPhase: String, CaseIterable, Hashable {
     case study
     case audio
     case test
@@ -32,7 +32,7 @@ private struct LearningQuizQuestion: Identifiable {
 struct SleepLearningView: View {
     @EnvironmentObject private var learningStore: SleepLearningStore
 
-    @State private var phase: LearningPhase = .study
+    @Binding private var phase: SleepLearningPhase
     @State private var studyIndex = 0
     @State private var isStudyAnswerVisible = false
     @State private var isPresentingAddCard = false
@@ -48,6 +48,22 @@ struct SleepLearningView: View {
 
     private let intervalOptions: [Double] = [30, 60, 120, 300]
     private let durationOptions = [15, 30, 60, 90, 390]
+
+    private let targetSleepSessionID: UUID?
+    private let onContinueToSleep: (() -> Void)?
+    private let onOpenHistory: (() -> Void)?
+
+    init(
+        phase: Binding<SleepLearningPhase> = .constant(.study),
+        targetSleepSessionID: UUID? = nil,
+        onContinueToSleep: (() -> Void)? = nil,
+        onOpenHistory: (() -> Void)? = nil
+    ) {
+        _phase = phase
+        self.targetSleepSessionID = targetSleepSessionID
+        self.onContinueToSleep = onContinueToSleep
+        self.onOpenHistory = onOpenHistory
+    }
 
     var body: some View {
         NavigationStack {
@@ -68,8 +84,8 @@ struct SleepLearningView: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .scrollContentBackground(.automatic)
-            .background(Color(uiColor: .systemGroupedBackground))
+            .scrollContentBackground(.hidden)
+            .ambientScreenBackground()
             .navigationTitle("睡眠学習")
             .navigationBarTitleDisplayMode(.large)
         }
@@ -91,6 +107,9 @@ struct SleepLearningView: View {
             }) {
                 resetQuiz()
             }
+        }
+        .onChange(of: targetSleepSessionID) { _, _ in
+            resetQuiz()
         }
         .sheet(isPresented: $isPresentingAddCard) {
             AddLearningCardSheet { prompt, answer, speechText, languageCode in
@@ -148,7 +167,7 @@ struct SleepLearningView: View {
 
     private var phaseSelector: some View {
         Picker("学習フェーズ", selection: $phase) {
-            ForEach(LearningPhase.allCases, id: \.rawValue) { phase in
+            ForEach(SleepLearningPhase.allCases, id: \.rawValue) { phase in
                 Text(phase.title)
                     .tag(phase)
             }
@@ -228,6 +247,16 @@ struct SleepLearningView: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
+
+            Button {
+                withAnimation(.snappy) {
+                    phase = .audio
+                }
+            } label: {
+                Label("次は睡眠音声", systemImage: "speaker.wave.2.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
         }
     }
 
@@ -336,6 +365,14 @@ struct SleepLearningView: View {
                     ? "読み上げを停止します"
                     : "選択したカードの読み上げを開始します"
             )
+
+            if let onContinueToSleep {
+                Button(action: onContinueToSleep) {
+                    Label("睡眠記録へ", systemImage: "moon.zzz.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            }
         } header: {
             Text("睡眠中の音声")
         } footer: {
@@ -511,6 +548,14 @@ struct SleepLearningView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+
+                if let onOpenHistory {
+                    Button(action: onOpenHistory) {
+                        Label("記録を見る", systemImage: "chart.bar.xaxis")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
             }
         } else if let question = currentQuizQuestion {
             Section {
@@ -579,6 +624,14 @@ struct SleepLearningView: View {
                     Label("テストにはカードが2枚以上必要です。", systemImage: "info.circle")
                         .font(.caption)
                         .foregroundStyle(.orange)
+                }
+
+                if let onOpenHistory {
+                    Button {
+                        skipMorningTest(then: onOpenHistory)
+                    } label: {
+                        Label("テストをスキップして記録へ", systemImage: "arrow.right")
+                    }
                 }
             } header: {
                 Text("朝の確認テスト")
@@ -850,7 +903,8 @@ struct SleepLearningView: View {
         } else {
             learningStore.saveTestResult(
                 correctAnswers: correctQuizAnswers,
-                totalQuestions: quizQuestions.count
+                totalQuestions: quizQuestions.count,
+                sleepSessionID: targetSleepSessionID
             )
             withAnimation(.snappy) {
                 isQuizComplete = true
@@ -864,6 +918,18 @@ struct SleepLearningView: View {
         selectedQuizOptionID = nil
         correctQuizAnswers = 0
         isQuizComplete = false
+    }
+
+    private func skipMorningTest(then completion: () -> Void) {
+        guard learningStore.saveTestResult(
+            correctAnswers: 0,
+            totalQuestions: 0,
+            sleepSessionID: targetSleepSessionID,
+            wasSkipped: true
+        ) != nil else {
+            return
+        }
+        completion()
     }
 
     private func quizOptionAccessibilityValue(

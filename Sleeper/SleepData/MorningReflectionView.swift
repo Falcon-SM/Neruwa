@@ -6,6 +6,7 @@ struct MorningReflectionView: View {
     @FocusState private var noteIsFocused: Bool
 
     let sessionID: UUID
+    private let onSaved: ((UUID) -> Void)?
 
     @State private var selectedMood: SleepMood?
     @State private var note = ""
@@ -13,6 +14,11 @@ struct MorningReflectionView: View {
 
     private let moods: [SleepMood] = [.bad, .flat, .good, .great]
     private let noteLimit = 240
+
+    init(sessionID: UUID, onSaved: ((UUID) -> Void)? = nil) {
+        self.sessionID = sessionID
+        self.onSaved = onSaved
+    }
 
     var body: some View {
         NavigationStack {
@@ -154,6 +160,7 @@ struct MorningReflectionView: View {
             mood: selectedMood,
             note: note.trimmingCharacters(in: .whitespacesAndNewlines)
         )
+        onSaved?(sessionID)
         dismiss()
     }
 }

@@ -12,6 +12,8 @@ struct ContentView: View {
     @State private var isRestoringSession = true
     @StateObject private var sleepStore = SleepStore()
     @StateObject private var learningStore = SleepLearningStore()
+    @StateObject private var eveningStore = EveningStore()
+    @StateObject private var ambientStore = AmbientEnvironmentStore()
 
     var body: some View {
         Group {
@@ -22,6 +24,8 @@ struct ContentView: View {
                 MainView(user: authenticatedUser)
                     .environmentObject(sleepStore)
                     .environmentObject(learningStore)
+                    .environmentObject(eveningStore)
+                    .environmentObject(ambientStore)
                     .transition(.opacity)
             } else {
                 LoginScreen(user: loginUser)
@@ -58,6 +62,7 @@ struct ContentView: View {
                 if let updatedUser {
                     sleepStore.activateProfile(updatedUser.id)
                     learningStore.activateProfile(updatedUser.id)
+                    eveningStore.activateProfile(updatedUser.id)
                 }
                 user = updatedUser
             }
@@ -72,6 +77,7 @@ struct ContentView: View {
                 if let signedInUser {
                     sleepStore.activateProfile(signedInUser.id)
                     learningStore.activateProfile(signedInUser.id)
+                    eveningStore.activateProfile(signedInUser.id)
                 }
                 user = signedInUser
             }
@@ -83,6 +89,8 @@ struct ContentView: View {
 
         if AppEnvironment.isRunningForPreviews {
             restoredUser = nil
+        } else if AppEnvironment.launchesGuestForUIValidation {
+            restoredUser = .guest
         } else {
             restoredUser = await AuthenticationService.restorePreviousUser()
         }
@@ -90,6 +98,7 @@ struct ContentView: View {
         if let restoredUser {
             sleepStore.activateProfile(restoredUser.id)
             learningStore.activateProfile(restoredUser.id)
+            eveningStore.activateProfile(restoredUser.id)
         }
         user = restoredUser
         isRestoringSession = false

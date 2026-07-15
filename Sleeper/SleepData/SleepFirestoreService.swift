@@ -55,6 +55,10 @@ final class SleepFirestoreService {
         try await write(record: .deletion(deletion))
     }
 
+    func markDeleted(_ deletions: [SleepDeletionTombstone]) async throws {
+        try await writeBatch(records: deletions.map(CloudRecord.deletion))
+    }
+
     static func merge(
         local: SleepCloudSnapshot,
         remote: SleepCloudSnapshot
