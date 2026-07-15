@@ -19,7 +19,7 @@ struct MainView: View {
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            Tab("ホーム", systemImage: "house.fill", value: .home) {
+            Tab("概要", systemImage: "heart.text.square.fill", value: .home) {
                 if let userBinding = Binding($user) {
                     HomeView(user: userBinding, selectedTab: $selectedTab)
                 } else {
@@ -32,10 +32,7 @@ struct MainView: View {
             }
 
             Tab("学習", systemImage: "book.fill", value: .learning) {
-                ZStack {
-                    NightSkyBackground()
-                    SleepLearningView()
-                }
+                SleepLearningView()
             }
 
             Tab("記録", systemImage: "chart.bar.xaxis", value: .history) {
@@ -53,22 +50,18 @@ struct MainView: View {
                 }
             }
         }
-        .tint(SleepPalette.warmGold)
+        .tint(.indigo)
+        .tabViewStyle(.sidebarAdaptable)
         .tabBarMinimizeBehavior(.onScrollDown)
-        .preferredColorScheme(.dark)
     }
 }
 
 private struct MissingUserView: View {
     var body: some View {
-        ZStack {
-            NightSkyBackground()
-            ContentUnavailableView(
-                "ユーザー情報がありません",
-                systemImage: "person.crop.circle.badge.exclamationmark"
-            )
-            .foregroundStyle(SleepPalette.text)
-        }
+        ContentUnavailableView(
+            "ユーザー情報がありません",
+            systemImage: "person.crop.circle.badge.exclamationmark"
+        )
     }
 }
 

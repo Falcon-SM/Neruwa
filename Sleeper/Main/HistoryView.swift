@@ -134,42 +134,84 @@ struct HistoryView: View {
             calendar: calendar
         )
 
-        ZStack {
-            NightSkyBackground()
+        NavigationStack {
+            List {
+                statusMessages
 
-            ScrollView {
-                LazyVStack(spacing: 18) {
-                    FlowHeader(
-                        eyebrow: "Morning · History",
-                        title: "睡眠の振り返り",
-                        subtitle: "長さだけでなく、朝の感覚も一緒に眺めます。",
-                        symbol: "chart.bar.xaxis"
-                    )
+                Section("直近7日間の概要") {
+                    summaryRows(snapshot)
+                }
 
-                    statusMessages
-                    summaryCard(snapshot)
+                Section {
                     sevenDayChart(snapshot)
-                    recordsHeader(count: snapshot.sortedSessions.count)
+                } header: {
+                    Text("睡眠時間")
+                } footer: {
+                    Text("棒は起きた日ごとの睡眠時間、線は直近7日間の平均目標です。")
+                }
 
+                Section {
                     if snapshot.sortedSessions.isEmpty {
                         emptyState
                     } else {
                         ForEach(snapshot.sortedSessions, id: \.id) { session in
-                            recordCard(session)
+                            recordRow(session)
+                                .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                                    Button {
+                                        reflectionTarget = ReflectionTarget(id: session.id)
+                                    } label: {
+                                        Label(
+                                            session.mood == nil ? "振り返る" : "編集",
+                                            systemImage: session.mood == nil ? "face.smiling" : "pencil"
+                                        )
+                                    }
+                                    .tint(.blue)
+                                }
+                                .swipeActions(edge: .trailing) {
+                                    Button(role: .destructive) {
+                                        pendingDeletionID = session.id
+                                    } label: {
+                                        Label("削除", systemImage: "trash")
+                                    }
+                                }
+                                .contextMenu {
+                                    Button {
+                                        reflectionTarget = ReflectionTarget(id: session.id)
+                                    } label: {
+                                        Label(
+                                            session.mood == nil ? "朝の気分を追加" : "振り返りを編集",
+                                            systemImage: session.mood == nil ? "face.smiling" : "pencil"
+                                        )
+                                    }
+
+                                    Button(role: .destructive) {
+                                        pendingDeletionID = session.id
+                                    } label: {
+                                        Label("削除", systemImage: "trash")
+                                    }
+                                }
                         }
+                    }
+                } header: {
+                    HStack {
+                        Text("すべての記録")
+                        Spacer()
+                        Text("\(snapshot.sortedSessions.count)件")
+                            .monospacedDigit()
                     }
                 }
             }
-            .sleepScreenScroll()
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.automatic)
+            .background(Color(uiColor: .systemGroupedBackground))
+            .navigationTitle("睡眠の振り返り")
+            .navigationBarTitleDisplayMode(.large)
         }
-        .foregroundStyle(SleepPalette.text)
-        .preferredColorScheme(.dark)
         .sheet(item: $reflectionTarget) { target in
             MorningReflectionView(sessionID: target.id)
                 .environmentObject(sleepStore)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
-                .presentationBackground(SleepPalette.night)
         }
         .confirmationDialog(
             "睡眠記録を削除",
@@ -200,281 +242,167 @@ struct HistoryView: View {
     @ViewBuilder
     private var statusMessages: some View {
         if let errorMessage = sleepStore.errorMessage, !errorMessage.isEmpty {
-            SleepStatusBanner(message: errorMessage, kind: .error)
+            Section {
+                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+            }
         } else if let statusMessage = sleepStore.statusMessage, !statusMessage.isEmpty {
-            SleepStatusBanner(message: statusMessage, kind: .success)
-        }
-    }
-
-    private func summaryCard(_ snapshot: HistorySnapshot) -> some View {
-        GlassCard(tint: SleepPalette.warmGold.opacity(0.09), padding: 16) {
-            VStack(spacing: 16) {
-                HStack(spacing: 0) {
-                    summaryMetric(
-                        title: "7日平均",
-                        value: SleepDurationFormatter.compact(minutes: snapshot.averageMinutes),
-                        symbol: "moon.fill",
-                        color: SleepPalette.warmGold
-                    )
-
-                    summaryDivider
-
-                    summaryMetric(
-                        title: "記録した日",
-                        value: "\(snapshot.recordedDayCount) / 7",
-                        symbol: "calendar.badge.checkmark",
-                        color: SleepPalette.chartBlue
-                    )
-
-                    summaryDivider
-
-                    summaryMetric(
-                        title: "目標",
-                        value: SleepDurationFormatter.compact(minutes: snapshot.averageTargetMinutes),
-                        symbol: "scope",
-                        color: SleepPalette.mint
-                    )
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("目標への到達度")
-                            .font(.caption)
-                            .foregroundStyle(SleepPalette.secondaryText)
-                        Spacer()
-                        Text("\(snapshot.achievementPercentage)%")
-                            .font(.caption.weight(.semibold).monospacedDigit())
-                            .foregroundStyle(SleepPalette.warmGold)
-                    }
-
-                    ProgressView(value: snapshot.achievementProgress)
-                        .tint(SleepPalette.warmGold)
-                        .accessibilityLabel("目標への到達度")
-                        .accessibilityValue("\(snapshot.achievementPercentage)パーセント")
-                }
+            Section {
+                Label(statusMessage, systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
             }
         }
     }
 
-    private func summaryMetric(
-        title: String,
-        value: String,
-        symbol: String,
-        color: Color
-    ) -> some View {
-        VStack(spacing: 5) {
-            Image(systemName: symbol)
-                .font(.caption)
-                .foregroundStyle(color)
-            Text(value)
-                .font(.subheadline.weight(.bold))
+    @ViewBuilder
+    private func summaryRows(_ snapshot: HistorySnapshot) -> some View {
+        LabeledContent {
+            Text(SleepDurationFormatter.compact(minutes: snapshot.averageMinutes))
                 .monospacedDigit()
-                .minimumScaleFactor(0.72)
-                .lineLimit(1)
-            Text(title)
-                .font(.caption2)
-                .foregroundStyle(SleepPalette.secondaryText)
+        } label: {
+            Label("7日平均", systemImage: "moon.fill")
         }
-        .frame(maxWidth: .infinity)
-        .accessibilityElement(children: .combine)
-    }
 
-    private var summaryDivider: some View {
-        Rectangle()
-            .fill(Color.white.opacity(0.10))
-            .frame(width: 1, height: 46)
-            .accessibilityHidden(true)
+        LabeledContent {
+            Text("\(snapshot.recordedDayCount) / 7")
+                .monospacedDigit()
+        } label: {
+            Label("記録した日", systemImage: "calendar.badge.checkmark")
+        }
+
+        LabeledContent {
+            Text(SleepDurationFormatter.compact(minutes: snapshot.averageTargetMinutes))
+                .monospacedDigit()
+        } label: {
+            Label("平均目標", systemImage: "scope")
+        }
+
+        VStack(alignment: .leading, spacing: 8) {
+            LabeledContent("目標への到達度") {
+                Text("\(snapshot.achievementPercentage)%")
+                    .monospacedDigit()
+            }
+            ProgressView(value: snapshot.achievementProgress)
+                .accessibilityLabel("目標への到達度")
+                .accessibilityValue("\(snapshot.achievementPercentage)パーセント")
+        }
     }
 
     private func sevenDayChart(_ snapshot: HistorySnapshot) -> some View {
-        SurfaceCard(tint: SleepPalette.chartBlue.opacity(0.10)) {
-            VStack(alignment: .leading, spacing: 15) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("直近7日間")
-                            .font(.headline)
-                        Text("棒は起きた日ごとの睡眠時間")
-                            .font(.caption)
-                            .foregroundStyle(SleepPalette.secondaryText)
-                    }
-
-                    Spacer()
-
-                    Label("目標", systemImage: "line.diagonal")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(SleepPalette.warmGold)
-                }
-
-                Chart {
-                    ForEach(snapshot.sevenDayPoints) { point in
-                        BarMark(
-                            x: .value("日", point.day, unit: .day),
-                            y: .value("睡眠時間", Double(point.minutes) / 60)
-                        )
-                        .foregroundStyle(
-                            point.minutes > 0
-                                ? SleepPalette.chartBlue
-                                : Color.white.opacity(0.07)
-                        )
-                        .cornerRadius(6)
-                    }
-
-                    RuleMark(
-                        y: .value("目標", Double(snapshot.averageTargetMinutes) / 60)
+        VStack(alignment: .leading, spacing: 12) {
+            Chart {
+                ForEach(snapshot.sevenDayPoints) { point in
+                    BarMark(
+                        x: .value("日", point.day, unit: .day),
+                        y: .value("睡眠時間", Double(point.minutes) / 60)
                     )
-                    .foregroundStyle(SleepPalette.warmGold.opacity(0.86))
-                    .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [5, 4]))
+                    .foregroundStyle(
+                        point.minutes > 0
+                            ? Color.accentColor
+                            : Color.secondary.opacity(0.12)
+                    )
+                    .cornerRadius(4)
                 }
-                .chartYScale(domain: 0...snapshot.chartCeiling)
-                .chartXAxis {
-                    AxisMarks(values: .stride(by: .day)) {
-                        AxisGridLine()
-                            .foregroundStyle(Color.clear)
-                        AxisTick()
-                            .foregroundStyle(Color.white.opacity(0.14))
-                        AxisValueLabel(format: .dateTime.weekday(.narrow))
-                            .foregroundStyle(SleepPalette.secondaryText)
-                    }
+
+                RuleMark(
+                    y: .value("目標", Double(snapshot.averageTargetMinutes) / 60)
+                )
+                .foregroundStyle(.orange)
+                .lineStyle(StrokeStyle(lineWidth: 1.2, dash: [5, 4]))
+            }
+            .chartYScale(domain: 0...snapshot.chartCeiling)
+            .chartXAxis {
+                AxisMarks(values: .stride(by: .day)) {
+                    AxisGridLine().foregroundStyle(.clear)
+                    AxisTick().foregroundStyle(.tertiary)
+                    AxisValueLabel(format: .dateTime.weekday(.narrow))
+                        .foregroundStyle(.secondary)
                 }
-                .chartYAxis {
-                    AxisMarks(position: .leading, values: .automatic(desiredCount: 5)) { value in
-                        AxisGridLine()
-                            .foregroundStyle(Color.white.opacity(0.08))
-                        AxisValueLabel {
-                            if let hours = value.as(Double.self) {
-                                Text("\(hours, specifier: "%.0f")h")
-                                    .font(.caption2)
-                                    .foregroundStyle(SleepPalette.secondaryText)
-                            }
+            }
+            .chartYAxis {
+                AxisMarks(position: .leading, values: .automatic(desiredCount: 5)) { value in
+                    AxisGridLine().foregroundStyle(.quaternary)
+                    AxisValueLabel {
+                        if let hours = value.as(Double.self) {
+                            Text("\(hours, specifier: "%.0f")h")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
-                .frame(height: 208)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(snapshot.chartAccessibilityLabel)
+            }
+            .frame(height: 208)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(snapshot.chartAccessibilityLabel)
 
-                if snapshot.recordedDayCount == 0 {
-                    Label("最初の睡眠を記録すると、ここにリズムが現れます。", systemImage: "sparkles")
-                        .font(.caption)
-                        .foregroundStyle(SleepPalette.secondaryText)
-                }
+            if snapshot.recordedDayCount == 0 {
+                Label("最初の睡眠を記録すると、ここにリズムが現れます。", systemImage: "sparkles")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
-    }
-
-    private func recordsHeader(count: Int) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text("すべての記録")
-                .font(.title3.bold())
-            Spacer()
-            Text("\(count)件")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(SleepPalette.secondaryText)
-        }
-        .padding(.top, 2)
     }
 
     private var emptyState: some View {
-        SurfaceCard(tint: SleepPalette.chartBlue.opacity(0.08)) {
-            ContentUnavailableView {
-                Label("まだ睡眠記録がありません", systemImage: "moon.zzz")
-            } description: {
-                Text("夜にタイマーを開始するか、昨夜の時間を手入力すると、ここから振り返れます。")
-            }
-            .foregroundStyle(SleepPalette.text)
+        ContentUnavailableView {
+            Label("まだ睡眠記録がありません", systemImage: "moon.zzz")
+        } description: {
+            Text("夜にタイマーを開始するか、昨夜の時間を手入力すると、ここから振り返れます。")
         }
         .accessibilityElement(children: .combine)
     }
 
-    private func recordCard(_ session: SleepSession) -> some View {
-        SurfaceCard(tint: moodTint(session.mood).opacity(0.08), padding: 16) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .center) {
-                    VStack(alignment: .leading, spacing: 3) {
+    private func recordRow(_ session: SleepSession) -> some View {
+        Button {
+            reflectionTarget = ReflectionTarget(id: session.id)
+        } label: {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(session.wakeDay, format: .dateTime.month().day().weekday(.wide))
                             .font(.headline)
                         Text("\(session.startDate.formatted(date: .omitted, time: .shortened)) 〜 \(session.endDate.formatted(date: .omitted, time: .shortened))")
                             .font(.caption.monospacedDigit())
-                            .foregroundStyle(SleepPalette.secondaryText)
+                            .foregroundStyle(.secondary)
                     }
 
                     Spacer()
 
-                    Button(role: .destructive) {
-                        pendingDeletionID = session.id
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(width: 22, height: 22)
-                    }
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
-                    .tint(SleepPalette.danger.opacity(0.13))
-                    .accessibilityLabel("この睡眠記録を削除")
-                }
-
-                HStack(alignment: .lastTextBaseline) {
                     Text(SleepDurationFormatter.summary(minutes: session.durationMinutes))
-                        .font(.title2.bold())
-                        .foregroundStyle(SleepPalette.text)
-                        .contentTransition(.numericText())
-
-                    Spacer()
-
-                    if let mood = session.mood {
-                        HStack(spacing: 5) {
-                            Text(mood.emoji)
-                            Text(mood.label)
-                                .font(.caption.weight(.semibold))
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .glassEffect(
-                            .regular.tint(moodTint(mood).opacity(0.18)),
-                            in: Capsule(style: .continuous)
-                        )
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel("今朝の気分、\(mood.label)")
-                    }
+                        .font(.headline)
+                        .monospacedDigit()
                 }
 
-                HStack(spacing: 7) {
-                    Image(systemName: session.shortageMinutes > 0 ? "scope" : "checkmark.seal.fill")
-                        .foregroundStyle(session.shortageMinutes > 0 ? SleepPalette.sunrise : SleepPalette.mint)
-                    Text(recordTargetMessage(session))
-                        .font(.caption)
-                        .foregroundStyle(SleepPalette.secondaryText)
+                Label(
+                    recordTargetMessage(session),
+                    systemImage: session.shortageMinutes > 0 ? "scope" : "checkmark.seal.fill"
+                )
+                .font(.caption)
+                .foregroundStyle(session.shortageMinutes > 0 ? .orange : .green)
+
+                if let mood = session.mood {
+                    LabeledContent {
+                        Text("\(mood.emoji) \(mood.label)")
+                    } label: {
+                        Label("今朝の気分", systemImage: "face.smiling")
+                    }
+                    .font(.subheadline)
                 }
 
                 if !session.note.isEmpty {
-                    Divider()
-                        .overlay(Color.white.opacity(0.10))
                     Label {
                         Text(session.note)
                             .lineLimit(3)
                     } icon: {
                         Image(systemName: "quote.opening")
-                            .foregroundStyle(SleepPalette.warmGold)
                     }
                     .font(.footnote)
-                    .foregroundStyle(SleepPalette.secondaryText)
+                    .foregroundStyle(.secondary)
                 }
-
-                Button {
-                    reflectionTarget = ReflectionTarget(id: session.id)
-                } label: {
-                    Label(
-                        session.mood == nil ? "朝の気分を追加" : "振り返りを編集",
-                        systemImage: session.mood == nil ? "face.smiling" : "pencil"
-                    )
-                    .font(.caption.weight(.semibold))
-                    .frame(maxWidth: .infinity, minHeight: 28)
-                }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.roundedRectangle(radius: 15))
-                .tint(moodTint(session.mood).opacity(0.12))
             }
         }
+        .buttonStyle(.plain)
+        .accessibilityHint(session.mood == nil ? "朝の気分を追加します" : "振り返りを編集します")
     }
 
     private func recordTargetMessage(_ session: SleepSession) -> String {
@@ -484,13 +412,4 @@ struct HistoryView: View {
         return "目標 \(SleepDurationFormatter.summary(minutes: session.targetMinutes))を達成"
     }
 
-    private func moodTint(_ mood: SleepMood?) -> Color {
-        guard let mood else { return SleepPalette.chartBlue }
-        return switch mood {
-        case .bad: SleepPalette.danger
-        case .flat: SleepPalette.secondaryText
-        case .good: SleepPalette.mint
-        case .great: SleepPalette.warmGold
-        }
-    }
 }

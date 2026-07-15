@@ -19,30 +19,15 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                NightSkyBackground()
-
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 18) {
-                        FlowHeader(
-                            eyebrow: "Settings",
-                            title: "設定",
-                            subtitle: "眠る目標とデータの扱いを調整できます。",
-                            symbol: "gearshape.fill",
-                            completedSteps: 0,
-                            totalSteps: 1
-                        )
-
-                        profileCard
-                        sleepGoalCard
-                        healthCard
-                        dataCard
-                        accountCard
-                    }
-                }
-                .sleepScreenScroll()
+            Form {
+                profileSection
+                sleepGoalSection
+                healthSection
+                dataSection
+                accountSection
             }
-            .toolbarBackground(.hidden, for: .navigationBar)
+            .navigationTitle("設定")
+            .navigationBarTitleDisplayMode(.large)
             .alert("ログアウトしますか？", isPresented: $showsLogoutConfirmation) {
                 Button("キャンセル", role: .cancel) {}
                 Button("ログアウト", role: .destructive, action: onLogout)
@@ -63,160 +48,134 @@ struct SettingsView: View {
         }
     }
 
-    private var profileCard: some View {
-        GlassCard {
-            HStack(spacing: 16) {
+    private var profileSection: some View {
+        Section("プロフィール") {
+            HStack(spacing: 14) {
                 Image(systemName: user.isGuest ? "person.crop.circle.badge.clock" : "person.crop.circle.fill")
-                    .font(.system(size: 34))
-                    .foregroundStyle(SleepPalette.warmGold)
-                    .frame(width: 58, height: 58)
-                    .glassEffect(
-                        .regular.tint(SleepPalette.warmGold.opacity(0.14)),
-                        in: .circle
-                    )
+                    .font(.largeTitle)
+                    .foregroundStyle(.blue)
+                    .accessibilityHidden(true)
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(user.name)
-                        .font(.title3.bold())
-                        .foregroundStyle(SleepPalette.text)
+                        .font(.headline)
                     Text(user.isGuest ? "ゲスト・この端末のみ" : "Firebase アカウント")
-                        .font(.caption)
-                        .foregroundStyle(SleepPalette.secondaryText)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
 
                 Spacer()
 
                 if sleepStore.isSyncing {
                     ProgressView()
-                        .tint(SleepPalette.warmGold)
                         .accessibilityLabel("同期中")
                 } else {
                     Image(systemName: user.isGuest ? "iphone" : "checkmark.icloud.fill")
-                        .foregroundStyle(user.isGuest ? SleepPalette.secondaryText : SleepPalette.mint)
+                        .foregroundStyle(user.isGuest ? Color.secondary : Color.green)
+                        .accessibilityLabel(user.isGuest ? "端末内に保存" : "同期済み")
                 }
             }
+            .padding(.vertical, 2)
         }
     }
 
-    private var sleepGoalCard: some View {
-        SurfaceCard(tint: SleepPalette.warmGold.opacity(0.06)) {
-            VStack(alignment: .leading, spacing: 16) {
-                Label("目標睡眠時間", systemImage: "target")
-                    .font(.headline)
-                    .foregroundStyle(SleepPalette.text)
-
-                HStack(alignment: .lastTextBaseline) {
-                    Text(SleepDurationFormatter.summary(minutes: targetMinutes))
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
-                        .foregroundStyle(SleepPalette.warmGold)
-                    Spacer()
-                    Text("6〜10時間")
-                        .font(.caption)
-                        .foregroundStyle(SleepPalette.secondaryText)
-                }
-
-                Slider(
-                    value: Binding(
-                        get: { Double(targetMinutes) },
-                        set: { targetMinutes = Int($0 / 15) * 15 }
-                    ),
-                    in: 360...600,
-                    step: 15
-                )
-                .tint(SleepPalette.warmGold)
-                .accessibilityValue(SleepDurationFormatter.summary(minutes: targetMinutes))
-
-                Text("睡眠を記録した時点の目標を各セッションへ保存するため、後から目標を変えても過去の比較は変わりません。")
-                    .font(.footnote)
-                    .foregroundStyle(SleepPalette.secondaryText)
-            }
-        }
-    }
-
-    private var healthCard: some View {
-        SurfaceCard(tint: SleepPalette.mint.opacity(0.08)) {
-            VStack(alignment: .leading, spacing: 14) {
-                Label("ヘルスケア連携", systemImage: "heart.text.square.fill")
-                    .font(.headline)
-                    .foregroundStyle(SleepPalette.text)
-
-                Text("Apple Watch や対応アプリが記録した昨晩の睡眠を読み取ります。ねるわから HealthKit へ書き込むことはありません。")
-                    .font(.footnote)
-                    .foregroundStyle(SleepPalette.secondaryText)
-
-                Button {
-                    Task { await importHealthKit() }
-                } label: {
-                    HStack {
-                        if isImportingHealthKit {
-                            ProgressView().tint(SleepPalette.text)
-                        } else {
-                            Image(systemName: "square.and.arrow.down")
-                        }
-                        Text(isImportingHealthKit ? "読み込み中…" : "昨晩の睡眠を読み込む")
-                    }
+    private var sleepGoalSection: some View {
+        Section {
+            LabeledContent("目標睡眠時間") {
+                Text(SleepDurationFormatter.summary(minutes: targetMinutes))
                     .fontWeight(.semibold)
-                    .frame(maxWidth: .infinity)
-                    .frame(minHeight: 46)
-                }
-                .buttonStyle(.glass)
-                .disabled(isImportingHealthKit)
             }
+
+            Slider(
+                value: Binding(
+                    get: { Double(targetMinutes) },
+                    set: { targetMinutes = Int($0 / 15) * 15 }
+                ),
+                in: 360...600,
+                step: 15
+            )
+            .tint(.orange)
+            .accessibilityLabel("目標睡眠時間")
+            .accessibilityValue(SleepDurationFormatter.summary(minutes: targetMinutes))
+
+            HStack {
+                Text("6時間")
+                Spacer()
+                Text("10時間")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        } header: {
+            Text("睡眠目標")
+        } footer: {
+            Text("目標は睡眠を記録した時点で各セッションに保存されます。変更しても過去の比較には影響しません。")
         }
     }
 
-    private var dataCard: some View {
-        SurfaceCard {
-            VStack(alignment: .leading, spacing: 14) {
-                Label("データ", systemImage: "externaldrive.fill")
-                    .font(.headline)
-                    .foregroundStyle(SleepPalette.text)
-
-                LabeledContent("保存済みセッション") {
-                    Text("\(sleepStore.sessions.count)件")
-                        .foregroundStyle(SleepPalette.text)
-                }
-                .foregroundStyle(SleepPalette.secondaryText)
-
-                if let statusMessage = sleepStore.statusMessage {
-                    SleepStatusBanner(message: statusMessage, kind: .success)
-                }
-
-                if let errorMessage = sleepStore.errorMessage {
-                    SleepStatusBanner(message: errorMessage, kind: .error)
-                }
-
-                Button(role: .destructive) {
-                    showsDeleteConfirmation = true
-                } label: {
-                    Label("すべての睡眠記録を削除", systemImage: "trash")
-                        .frame(maxWidth: .infinity)
-                        .frame(minHeight: 44)
-                }
-                .buttonStyle(.glass)
-                .tint(SleepPalette.danger)
-                .disabled(sleepStore.sessions.isEmpty)
+    private var healthSection: some View {
+        Section {
+            Label {
+                Text("Apple Watchや対応アプリが記録した昨晩の睡眠を読み取ります。Neruwaからヘルスケアへ書き込むことはありません。")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } icon: {
+                Image(systemName: "heart.text.square.fill")
+                    .foregroundStyle(.pink)
             }
+
+            Button {
+                Task { await importHealthKit() }
+            } label: {
+                HStack(spacing: 8) {
+                    if isImportingHealthKit {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "square.and.arrow.down")
+                    }
+                    Text(isImportingHealthKit ? "読み込み中…" : "昨晩の睡眠を読み込む")
+                }
+            }
+            .disabled(isImportingHealthKit)
+        } header: {
+            Text("ヘルスケア連携")
         }
     }
 
-    private var accountCard: some View {
-        SurfaceCard {
-            VStack(alignment: .leading, spacing: 14) {
-                Label("アカウント", systemImage: "person.crop.circle")
-                    .font(.headline)
-                    .foregroundStyle(SleepPalette.text)
+    private var dataSection: some View {
+        Section("データ") {
+            LabeledContent("保存済みセッション", value: "\(sleepStore.sessions.count)件")
 
-                Button {
-                    showsLogoutConfirmation = true
-                    HapticsManager.instance.notification(type: .warning)
-                } label: {
-                    Label(user.isGuest ? "ゲストモードを終了" : "ログアウト", systemImage: "rectangle.portrait.and.arrow.right")
-                        .fontWeight(.semibold)
-                        .frame(maxWidth: .infinity)
-                        .frame(minHeight: 46)
-                }
-                .buttonStyle(.glass)
+            if let statusMessage = sleepStore.statusMessage {
+                Label(statusMessage, systemImage: "checkmark.circle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.green)
+            }
+
+            if let errorMessage = sleepStore.errorMessage {
+                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+
+            Button(role: .destructive) {
+                showsDeleteConfirmation = true
+            } label: {
+                Label("すべての睡眠記録を削除", systemImage: "trash")
+            }
+            .disabled(sleepStore.sessions.isEmpty)
+        }
+    }
+
+    private var accountSection: some View {
+        Section("アカウント") {
+            Button(role: .destructive) {
+                showsLogoutConfirmation = true
+                HapticsManager.instance.notification(type: .warning)
+            } label: {
+                Label(
+                    user.isGuest ? "ゲストモードを終了" : "ログアウト",
+                    systemImage: "rectangle.portrait.and.arrow.right"
+                )
             }
         }
     }

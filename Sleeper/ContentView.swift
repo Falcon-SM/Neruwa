@@ -112,37 +112,20 @@ struct ContentView: View {
 
 private struct SessionRestoringView: View {
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.025, green: 0.045, blue: 0.10),
-                    Color(red: 0.075, green: 0.08, blue: 0.18)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+        VStack(spacing: 14) {
+            ProgressView()
+                .controlSize(.large)
+                .tint(.indigo)
 
-            VStack(spacing: 16) {
-                ProgressView()
-                    .controlSize(.large)
-                    .tint(.white.opacity(0.9))
+            Text("夜の準備をしています")
+                .font(.headline)
 
-                Text("夜の準備をしています")
-                    .font(.headline)
-                    .foregroundStyle(.white.opacity(0.92))
-
-                Text("前回の睡眠記録につないでいます")
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.58))
-            }
-            .padding(.horizontal, 32)
-            .padding(.vertical, 28)
-            .glassEffect(
-                .regular.tint(Color(red: 0.22, green: 0.25, blue: 0.48).opacity(0.22)),
-                in: .rect(cornerRadius: 28)
-            )
+            Text("前回の睡眠記録につないでいます")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemBackground))
     }
 }
 

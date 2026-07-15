@@ -10,13 +10,6 @@ private enum SleepEntryMode: String, CaseIterable {
         case .manual: "手入力"
         }
     }
-
-    var symbol: String {
-        switch self {
-        case .timer: "timer"
-        case .manual: "square.and.pencil"
-        }
-    }
 }
 
 struct SleepRecorderView: View {
@@ -61,36 +54,58 @@ struct SleepRecorderView: View {
     private let targetStep = 15
 
     var body: some View {
-        ZStack {
-            NightSkyBackground()
-
+        NavigationStack {
             ScrollView {
-                LazyVStack(spacing: 18) {
-                    FlowHeader(
-                        eyebrow: "Night · Sleep",
-                        title: "睡眠記録",
-                        subtitle: "一日を閉じて、明日の朝へつなげます。",
-                        symbol: "moon.stars.fill"
-                    )
+                LazyVStack(alignment: .leading, spacing: 24) {
+                    Text("睡眠時間を記録して、朝の調子と一緒に振り返ります。")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
 
                     statusMessages
-                    modeSelector
 
-                    if entryMode.rawValue == SleepEntryMode.timer.rawValue {
+                    Picker("記録方法", selection: $entryMode) {
+                        ForEach(SleepEntryMode.allCases, id: \.self) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    if entryMode == .timer {
                         timerContent
                     } else {
                         manualContent
                     }
 
+                    Divider()
+
                     targetControl
-                    primaryAction
-                    healthKitAction
+
+                    Button(action: importFromHealthKit) {
+                        HStack {
+                            Spacer()
+                            if sleepStore.isSyncing {
+                                ProgressView()
+                            } else {
+                                Image(systemName: "heart.text.square")
+                            }
+                            Text(sleepStore.isSyncing ? "ヘルスケアを確認中…" : "ヘルスケアから読み込む")
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .disabled(sleepStore.isSyncing || sleepStore.activeTimerStartedAt != nil)
+                    .accessibilityHint("Appleヘルスケアに保存された昨夜の睡眠を取り込みます")
                 }
+                .padding(.vertical, 16)
             }
-            .sleepScreenScroll()
+            .contentMargins(.horizontal, 20, for: .scrollContent)
+            .scrollDismissesKeyboard(.interactively)
+            .scrollBounceBehavior(.basedOnSize)
+            .background(Color(uiColor: .systemBackground))
+            .navigationTitle("睡眠")
+            .navigationBarTitleDisplayMode(.large)
         }
-        .foregroundStyle(SleepPalette.text)
-        .preferredColorScheme(.dark)
         .onAppear {
             isScreenVisible = true
             timerNow = Date()
@@ -113,113 +128,77 @@ struct SleepRecorderView: View {
                 .environmentObject(sleepStore)
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
-                .presentationBackground(SleepPalette.night)
         }
     }
 
     @ViewBuilder
     private var statusMessages: some View {
         if let errorMessage = sleepStore.errorMessage, !errorMessage.isEmpty {
-            SleepStatusBanner(message: errorMessage, kind: .error)
+            Label(errorMessage, systemImage: "exclamationmark.circle.fill")
+                .font(.callout)
+                .foregroundStyle(.red)
         } else if let statusMessage = sleepStore.statusMessage, !statusMessage.isEmpty {
-            SleepStatusBanner(message: statusMessage, kind: .success)
-        }
-    }
-
-    private var modeSelector: some View {
-        GlassEffectContainer(spacing: 10) {
-            HStack(spacing: 10) {
-                ForEach(SleepEntryMode.allCases, id: \.rawValue) { mode in
-                    modeButton(mode)
-                }
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("記録方法")
-    }
-
-    @ViewBuilder
-    private func modeButton(_ mode: SleepEntryMode) -> some View {
-        let selected = entryMode.rawValue == mode.rawValue
-
-        if selected {
-            Button {
-                withAnimation(.snappy) {
-                    entryMode = mode
-                }
-            } label: {
-                Label(mode.title, systemImage: mode.symbol)
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity, minHeight: 34)
-            }
-            .buttonStyle(.glassProminent)
-            .buttonBorderShape(.roundedRectangle(radius: 18))
-            .tint(SleepPalette.warmGold)
-            .foregroundStyle(SleepPalette.night)
-            .accessibilityAddTraits(.isSelected)
-        } else {
-            Button {
-                withAnimation(.snappy) {
-                    entryMode = mode
-                }
-            } label: {
-                Label(mode.title, systemImage: mode.symbol)
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity, minHeight: 34)
-            }
-            .buttonStyle(.glass)
-            .buttonBorderShape(.roundedRectangle(radius: 18))
-            .tint(Color.white.opacity(0.08))
-            .foregroundStyle(SleepPalette.text)
+            Label(statusMessage, systemImage: "checkmark.circle.fill")
+                .font(.callout)
+                .foregroundStyle(.green)
         }
     }
 
     private var timerContent: some View {
         let elapsed = elapsedTime(at: timerNow)
 
-        return GlassCard(tint: SleepPalette.chartBlue.opacity(0.10), padding: 20) {
-            VStack(spacing: 18) {
-                HStack {
-                    Label(
-                        sleepStore.activeTimerStartedAt == nil ? "就寝前" : "計測中",
-                        systemImage: sleepStore.activeTimerStartedAt == nil
-                            ? "moon.zzz.fill"
-                            : "waveform.path.ecg"
-                    )
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(
-                        sleepStore.activeTimerStartedAt == nil
-                            ? SleepPalette.secondaryText
-                            : SleepPalette.mint
-                    )
+        return VStack(spacing: 18) {
+            HStack {
+                Label(
+                    sleepStore.activeTimerStartedAt == nil ? "待機中" : "計測中",
+                    systemImage: sleepStore.activeTimerStartedAt == nil ? "moon.zzz" : "record.circle"
+                )
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(
+                    sleepStore.activeTimerStartedAt == nil ? Color.secondary : Color.green
+                )
 
-                    Spacer()
+                Spacer()
 
-                    if let startedAt = sleepStore.activeTimerStartedAt {
-                        Text(startedAt, format: .dateTime.hour().minute())
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(SleepPalette.secondaryText)
-                            .accessibilityLabel("開始時刻")
-                    }
+                if let startedAt = sleepStore.activeTimerStartedAt {
+                    Text("開始 \(startedAt.formatted(date: .omitted, time: .shortened))")
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(.secondary)
                 }
-
-                SleepTimerDial(elapsed: elapsed)
-                    .frame(maxWidth: 276)
-                    .aspectRatio(1, contentMode: .fit)
-                    .frame(maxWidth: .infinity)
-
-                VStack(spacing: 4) {
-                    Text(SleepDurationFormatter.clock(elapsed))
-                        .font(.system(size: 35, weight: .medium, design: .rounded))
-                        .monospacedDigit()
-                        .contentTransition(.numericText())
-                    Text(sleepStore.activeTimerStartedAt == nil ? "準備ができたら始めましょう" : "ゆっくり、おやすみなさい")
-                        .font(.footnote)
-                        .foregroundStyle(SleepPalette.secondaryText)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("経過時間 \(SleepDurationFormatter.clock(elapsed))")
             }
+
+            SleepTimerDial(elapsed: elapsed)
+                .frame(maxWidth: 300)
+                .aspectRatio(1, contentMode: .fit)
+                .frame(maxWidth: .infinity)
+
+            VStack(spacing: 4) {
+                Text(SleepDurationFormatter.clock(elapsed))
+                    .font(.system(.largeTitle, design: .rounded, weight: .regular))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                Text(sleepStore.activeTimerStartedAt == nil ? "準備ができたら開始してください" : "計測を続けています")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("経過時間 \(SleepDurationFormatter.clock(elapsed))")
+
+            Button(action: toggleTimer) {
+                Label(
+                    sleepStore.activeTimerStartedAt == nil ? "睡眠を開始" : "起床して記録",
+                    systemImage: sleepStore.activeTimerStartedAt == nil ? "moon.fill" : "sunrise.fill"
+                )
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .tint(sleepStore.activeTimerStartedAt == nil ? .indigo : .orange)
+            .accessibilityHint(
+                sleepStore.activeTimerStartedAt == nil
+                    ? "睡眠時間の計測を開始します"
+                    : "計測を終了して睡眠記録を保存します"
+            )
         }
     }
 
@@ -227,206 +206,57 @@ struct SleepRecorderView: View {
         let dates = resolvedManualDates
         let duration = manualDurationMinutes
 
-        return SurfaceCard(tint: SleepPalette.sunrise.opacity(0.09)) {
-            VStack(alignment: .leading, spacing: 20) {
-                HStack {
-                    Label("日時を入力", systemImage: "calendar.badge.clock")
-                        .font(.headline)
-                    Spacer()
-                    Text(SleepDurationFormatter.summary(minutes: duration))
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(SleepPalette.warmGold)
-                        .contentTransition(.numericText())
-                }
-
-                DatePicker(
-                    "就寝日",
-                    selection: $manualDay,
-                    displayedComponents: .date
-                )
-                .datePickerStyle(.compact)
-                .tint(SleepPalette.warmGold)
-
-                Divider()
-                    .overlay(Color.white.opacity(0.12))
-
-                HStack(alignment: .center, spacing: 10) {
-                    manualTimePicker(
-                        title: "寝た時間",
-                        symbol: "moon.fill",
-                        selection: $manualStartTime
-                    )
-
-                    Image(systemName: "arrow.right")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(SleepPalette.warmGold)
-                        .accessibilityHidden(true)
-
-                    manualTimePicker(
-                        title: "起きた時間",
-                        symbol: "sun.horizon.fill",
-                        selection: $manualEndTime
-                    )
-                }
-
-                Label {
-                    Text("\(dates.start.formatted(date: .abbreviated, time: .shortened)) 〜 \(dates.end.formatted(date: .abbreviated, time: .shortened))")
-                } icon: {
-                    Image(systemName: "sparkles")
-                        .foregroundStyle(SleepPalette.sunrise)
-                }
-                .font(.caption)
-                .foregroundStyle(SleepPalette.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
-
-                Text("起きた時間が寝た時間以前の場合は、翌朝として安全に記録します。")
-                    .font(.caption2)
-                    .foregroundStyle(SleepPalette.secondaryText)
+        return VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("睡眠時間")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Text(SleepDurationFormatter.summary(minutes: duration))
+                    .font(.largeTitle.weight(.semibold))
+                    .contentTransition(.numericText())
             }
-        }
-    }
 
-    private func manualTimePicker(
-        title: String,
-        symbol: String,
-        selection: Binding<Date>
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(title, systemImage: symbol)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(SleepPalette.secondaryText)
+            Divider()
 
-            DatePicker(
-                title,
-                selection: selection,
-                displayedComponents: .hourAndMinute
-            )
-            .labelsHidden()
-            .datePickerStyle(.compact)
-            .tint(SleepPalette.warmGold)
+            DatePicker("就寝日", selection: $manualDay, displayedComponents: .date)
+            DatePicker("就寝時刻", selection: $manualStartTime, displayedComponents: .hourAndMinute)
+            DatePicker("起床時刻", selection: $manualEndTime, displayedComponents: .hourAndMinute)
+
+            Text("\(dates.start.formatted(date: .abbreviated, time: .shortened)) 〜 \(dates.end.formatted(date: .abbreviated, time: .shortened))")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            Text("起床時刻が就寝時刻以前の場合は、翌朝として記録します。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Button(action: saveManualEntry) {
+                Label("この時間で記録", systemImage: "checkmark")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .tint(.indigo)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var targetControl: some View {
-        SurfaceCard(tint: SleepPalette.warmGold.opacity(0.08), padding: 16) {
-            HStack(spacing: 14) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Label("目標睡眠時間", systemImage: "scope")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(SleepPalette.secondaryText)
-                    Text(SleepDurationFormatter.summary(minutes: targetMinutes))
-                        .font(.title3.bold())
-                        .foregroundStyle(SleepPalette.text)
-                        .contentTransition(.numericText())
-                }
-
-                Spacer(minLength: 8)
-
-                GlassEffectContainer(spacing: 8) {
-                    HStack(spacing: 8) {
-                        targetAdjustmentButton(
-                            symbol: "minus",
-                            accessibilityLabel: "目標を15分短くする",
-                            disabled: targetMinutes <= minimumTarget
-                        ) {
-                            adjustTarget(by: -targetStep)
-                        }
-
-                        targetAdjustmentButton(
-                            symbol: "plus",
-                            accessibilityLabel: "目標を15分長くする",
-                            disabled: targetMinutes >= maximumTarget
-                        ) {
-                            adjustTarget(by: targetStep)
-                        }
-                    }
-                }
+        Stepper(
+            value: $targetMinutes,
+            in: minimumTarget...maximumTarget,
+            step: targetStep
+        ) {
+            LabeledContent {
+                Text(SleepDurationFormatter.summary(minutes: targetMinutes))
+                    .fontWeight(.semibold)
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+            } label: {
+                Label("睡眠目標", systemImage: "target")
             }
         }
-        .accessibilityElement(children: .contain)
         .accessibilityValue(SleepDurationFormatter.summary(minutes: targetMinutes))
-    }
-
-    private func targetAdjustmentButton(
-        symbol: String,
-        accessibilityLabel: String,
-        disabled: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.body.weight(.semibold))
-                .frame(width: 24, height: 24)
-        }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
-        .tint(Color.white.opacity(0.08))
-        .disabled(disabled)
-        .accessibilityLabel(accessibilityLabel)
-    }
-
-    @ViewBuilder
-    private var primaryAction: some View {
-        if entryMode.rawValue == SleepEntryMode.timer.rawValue {
-            Button(action: toggleTimer) {
-                Label(
-                    sleepStore.activeTimerStartedAt == nil
-                        ? "睡眠をはじめる"
-                        : "起きた・記録する",
-                    systemImage: sleepStore.activeTimerStartedAt == nil
-                        ? "moon.fill"
-                        : "sunrise.fill"
-                )
-                .font(.headline)
-                .frame(maxWidth: .infinity, minHeight: 38)
-            }
-            .buttonStyle(.glassProminent)
-            .buttonBorderShape(.roundedRectangle(radius: 18))
-            .tint(
-                sleepStore.activeTimerStartedAt == nil
-                    ? SleepPalette.warmGold
-                    : SleepPalette.sunrise
-            )
-            .foregroundStyle(SleepPalette.night)
-            .accessibilityHint(
-                sleepStore.activeTimerStartedAt == nil
-                    ? "睡眠時間の計測を開始します"
-                    : "計測を終了して睡眠記録を保存します"
-            )
-        } else {
-            Button(action: saveManualEntry) {
-                Label("この時間で記録する", systemImage: "checkmark.circle.fill")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, minHeight: 38)
-            }
-            .buttonStyle(.glassProminent)
-            .buttonBorderShape(.roundedRectangle(radius: 18))
-            .tint(SleepPalette.warmGold)
-            .foregroundStyle(SleepPalette.night)
-        }
-    }
-
-    private var healthKitAction: some View {
-        Button(action: importFromHealthKit) {
-            HStack(spacing: 10) {
-                if sleepStore.isSyncing {
-                    ProgressView()
-                        .tint(SleepPalette.text)
-                } else {
-                    Image(systemName: "heart.text.square.fill")
-                        .foregroundStyle(SleepPalette.mint)
-                }
-                Text(sleepStore.isSyncing ? "ヘルスケアを確認中…" : "昨夜をヘルスケアから読み込む")
-                    .font(.subheadline.weight(.semibold))
-            }
-            .frame(maxWidth: .infinity, minHeight: 34)
-        }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.roundedRectangle(radius: 18))
-        .tint(SleepPalette.mint.opacity(0.12))
-        .disabled(sleepStore.isSyncing || sleepStore.activeTimerStartedAt != nil)
-        .accessibilityHint("Appleヘルスケアに保存された昨夜の睡眠を取り込みます")
+        .accessibilityHint("15分単位で調整できます")
     }
 
     private var resolvedManualDates: (start: Date, end: Date) {
@@ -499,12 +329,6 @@ struct SleepRecorderView: View {
         return minimumTarget + (steps * targetStep)
     }
 
-    private func adjustTarget(by minutes: Int) {
-        withAnimation(.snappy) {
-            targetMinutes = normalizedTarget(targetMinutes + minutes)
-        }
-    }
-
     private func toggleTimer() {
         if sleepStore.activeTimerStartedAt == nil {
             sleepStore.startTimer()
@@ -569,28 +393,11 @@ private struct SleepTimerDial: View {
                 SleepTimerFace(radius: radius)
                     .equatable()
 
-                hand(
-                    width: 5,
-                    length: radius * 0.44,
-                    color: SleepPalette.text,
-                    angle: hourAngle
-                )
-                hand(
-                    width: 3.5,
-                    length: radius * 0.62,
-                    color: SleepPalette.warmGold,
-                    angle: minuteAngle
-                )
-                hand(
-                    width: 1.5,
-                    length: radius * 0.68,
-                    color: SleepPalette.sunrise,
-                    angle: secondAngle
-                )
-
+                hand(width: 5, length: radius * 0.43, color: .primary, angle: hourAngle)
+                hand(width: 3.5, length: radius * 0.62, color: .orange, angle: minuteAngle)
+                hand(width: 1.5, length: radius * 0.70, color: .red, angle: secondAngle)
             }
             .font(.system(.body, design: .rounded, weight: .semibold))
-            .foregroundStyle(SleepPalette.text)
             .frame(width: side, height: side)
             .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
         }
@@ -608,52 +415,25 @@ private struct SleepTimerDial: View {
             .frame(width: width, height: length)
             .offset(y: -(length / 2))
             .rotationEffect(angle)
-            .shadow(color: color.opacity(0.22), radius: 4)
     }
 }
 
-/// The face does not depend on elapsed time. EquatableView lets SwiftUI keep
-/// its 60 tick marks intact while only the three clock hands update.
+/// The face does not depend on elapsed time, so only the hands redraw each second.
 private struct SleepTimerFace: View, Equatable {
     let radius: CGFloat
 
     var body: some View {
         ZStack {
             Circle()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            SleepPalette.panel.opacity(0.86),
-                            SleepPalette.night.opacity(0.90)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+                .fill(Color(uiColor: .secondarySystemBackground))
                 .overlay {
                     Circle()
-                        .stroke(
-                            LinearGradient(
-                                colors: [
-                                    SleepPalette.warmGold.opacity(0.40),
-                                    Color.white.opacity(0.08),
-                                    SleepPalette.chartBlue.opacity(0.34)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1.4
-                        )
-                        .allowsHitTesting(false)
+                        .stroke(Color.secondary.opacity(0.22), lineWidth: 1)
                 }
 
             ForEach(0..<60, id: \.self) { tick in
                 Capsule(style: .continuous)
-                    .fill(
-                        tick.isMultiple(of: 5)
-                            ? SleepPalette.text.opacity(0.76)
-                            : SleepPalette.secondaryText.opacity(0.30)
-                    )
+                    .fill(tick.isMultiple(of: 5) ? Color.primary.opacity(0.72) : Color.secondary.opacity(0.30))
                     .frame(
                         width: tick.isMultiple(of: 5) ? 2.4 : 1,
                         height: tick.isMultiple(of: 5) ? 10 : 4
@@ -677,11 +457,11 @@ private struct SleepTimerFace: View, Equatable {
             .padding(.horizontal, 34)
 
             Circle()
-                .fill(SleepPalette.warmGold)
+                .fill(.red)
                 .frame(width: 13, height: 13)
                 .overlay {
                     Circle()
-                        .fill(SleepPalette.night)
+                        .fill(Color(uiColor: .systemBackground))
                         .frame(width: 5, height: 5)
                 }
         }
