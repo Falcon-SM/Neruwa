@@ -53,9 +53,20 @@ struct SleepRecorderView: View {
     private let maximumTarget = 10 * 60
     private let targetStep = 15
     private let onReflectionSaved: ((UUID) -> Void)?
+    private let onSleepStarted: (() -> Void)?
+    private let onSleepSessionSaved: ((UUID) -> Void)?
+    private let automaticallyPresentsReflection: Bool
 
-    init(onReflectionSaved: ((UUID) -> Void)? = nil) {
+    init(
+        onReflectionSaved: ((UUID) -> Void)? = nil,
+        onSleepStarted: (() -> Void)? = nil,
+        onSleepSessionSaved: ((UUID) -> Void)? = nil,
+        automaticallyPresentsReflection: Bool = true
+    ) {
         self.onReflectionSaved = onReflectionSaved
+        self.onSleepStarted = onSleepStarted
+        self.onSleepSessionSaved = onSleepSessionSaved
+        self.automaticallyPresentsReflection = automaticallyPresentsReflection
     }
 
     var body: some View {
@@ -344,13 +355,16 @@ struct SleepRecorderView: View {
                learningStore.settings.autoStartWithSleepTimer {
                 learningStore.startSleepPlayback()
             }
+            if sleepStore.activeTimerStartedAt != nil {
+                onSleepStarted?()
+            }
         } else {
             let session = sleepStore.stopTimer(targetMinutes: targetMinutes)
             if learningStore.settings.autoStartWithSleepTimer {
                 learningStore.stopSleepPlayback()
             }
             if let session {
-                reflectionTarget = ReflectionTarget(id: session.id)
+                handleSavedSession(session)
             }
         }
     }
@@ -362,7 +376,7 @@ struct SleepRecorderView: View {
             endDate: dates.end,
             targetMinutes: targetMinutes
         ) {
-            reflectionTarget = ReflectionTarget(id: session.id)
+            handleSavedSession(session)
         }
     }
 
@@ -371,8 +385,15 @@ struct SleepRecorderView: View {
             if let session = await sleepStore.importLastNightFromHealthKit(
                 targetMinutes: targetMinutes
             ) {
-                reflectionTarget = ReflectionTarget(id: session.id)
+                handleSavedSession(session)
             }
+        }
+    }
+
+    private func handleSavedSession(_ session: SleepSession) {
+        onSleepSessionSaved?(session.id)
+        if automaticallyPresentsReflection {
+            reflectionTarget = ReflectionTarget(id: session.id)
         }
     }
 }

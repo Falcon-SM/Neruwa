@@ -1,0 +1,135 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isCurrentUser(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    // Private sleep records remain readable and writable only by their owner.
+    match /users/{userId}/sleepSessions/{sessionId} {
+      allow read, write: if isCurrentUser(userId);
+    }
+
+    match /sleepFeedPosts/{postId} {
+      // The first in-app version is a small authenticated cohort. A friend graph
+      // can narrow this read rule later without changing the privacy-reduced post.
+      allow read: if signedIn();
+
+      allow create: if signedIn()
+                    && request.resource.data.keys().hasOnly([
+                      'schemaVersion',
+                      'authorAlias',
+                      'wakeDay',
+                      'durationMinutes',
+                      'achievementPercentage',
+                      'mood',
+                      'comment',
+                      'createdAt',
+                      'reactionCount'
+                    ])
+                    && request.resource.data.schemaVersion == 1
+                    && existsAfter(
+                      /databases/$(database)/documents/sleepFeedPostOwners/$(postId)
+                    )
+                    && getAfter(
+                      /databases/$(database)/documents/sleepFeedPostOwners/$(postId)
+                    ).data.ownerID == request.auth.uid
+                    && request.resource.data.authorAlias is string
+                    && request.resource.data.authorAlias.size() >= 2
+                    && request.resource.data.authorAlias.size() <= 20
+                    && request.resource.data.wakeDay is timestamp
+                    && request.resource.data.durationMinutes is int
+                    && request.resource.data.durationMinutes >= 0
+                    && request.resource.data.durationMinutes <= 1200
+                    && (
+                      request.resource.data.achievementPercentage == null
+                      || (
+                        request.resource.data.achievementPercentage is int
+                        && request.resource.data.achievementPercentage >= 0
+                        && request.resource.data.achievementPercentage <= 300
+                      )
+                    )
+                    && (
+                      request.resource.data.mood == null
+                      || request.resource.data.mood in ['bad', 'flat', 'good', 'great']
+                    )
+                    && request.resource.data.comment is string
+                    && request.resource.data.comment.size() <= 80
+                    && request.resource.data.createdAt == request.time
+                    && request.resource.data.reactionCount == 0;
+
+      // A feed post is immutable. The only update is a paired +/-1 reaction
+      // batch whose per-user reaction document changes in the same commit.
+      allow update: if signedIn()
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                      .hasOnly(['reactionCount'])
+                    && request.resource.data.reactionCount is int
+                    && request.resource.data.reactionCount >= 0
+                    && (
+                      (
+                        request.resource.data.reactionCount == resource.data.reactionCount + 1
+                        && !exists(
+                          /databases/$(database)/documents/sleepFeedPosts/$(postId)/sleepFeedReactions/$(request.auth.uid)
+                        )
+                        && existsAfter(
+                          /databases/$(database)/documents/sleepFeedPosts/$(postId)/sleepFeedReactions/$(request.auth.uid)
+                        )
+                      )
+                      || (
+                        request.resource.data.reactionCount == resource.data.reactionCount - 1
+                        && exists(
+                          /databases/$(database)/documents/sleepFeedPosts/$(postId)/sleepFeedReactions/$(request.auth.uid)
+                        )
+                        && !existsAfter(
+                          /databases/$(database)/documents/sleepFeedPosts/$(postId)/sleepFeedReactions/$(request.auth.uid)
+                        )
+                      )
+                    );
+
+      allow delete: if signedIn()
+                    && get(
+                      /databases/$(database)/documents/sleepFeedPostOwners/$(postId)
+                    ).data.ownerID == request.auth.uid;
+
+      match /sleepFeedReactions/{userId} {
+        // This condition also supports the collection-group query that obtains
+        // only the signed-in user's own reactions.
+        allow get: if isCurrentUser(userId);
+        allow list: if signedIn() && resource.data.userID == request.auth.uid;
+        allow create: if isCurrentUser(userId)
+                      && request.resource.data.keys().hasOnly(['userID', 'createdAt'])
+                      && request.resource.data.userID == request.auth.uid
+                      && request.resource.data.createdAt == request.time
+                      && getAfter(
+                        /databases/$(database)/documents/sleepFeedPosts/$(postId)
+                      ).data.reactionCount == get(
+                        /databases/$(database)/documents/sleepFeedPosts/$(postId)
+                      ).data.reactionCount + 1;
+        allow delete: if isCurrentUser(userId)
+                      && getAfter(
+                        /databases/$(database)/documents/sleepFeedPosts/$(postId)
+                      ).data.reactionCount == get(
+                        /databases/$(database)/documents/sleepFeedPosts/$(postId)
+                      ).data.reactionCount - 1;
+        allow update: if false;
+      }
+    }
+
+    // Ownership is isolated from the public post so feed readers never receive
+    // another person's Firebase UID.
+    match /sleepFeedPostOwners/{postId} {
+      allow read: if signedIn() && resource.data.ownerID == request.auth.uid;
+      allow create: if signedIn()
+                    && request.resource.data.keys().hasOnly(['ownerID', 'createdAt'])
+                    && request.resource.data.ownerID == request.auth.uid
+                    && request.resource.data.createdAt == request.time;
+      allow delete: if signedIn() && resource.data.ownerID == request.auth.uid;
+      allow update: if false;
+    }
+  }
+}

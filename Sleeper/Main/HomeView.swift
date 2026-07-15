@@ -107,7 +107,7 @@ struct HomeView: View {
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .ambientScreenBackground()
-            .navigationTitle("概要")
+            .navigationTitle("ねるね")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {

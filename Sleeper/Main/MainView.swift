@@ -33,7 +33,7 @@ struct MainView: View {
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            Tab("概要", systemImage: "heart.text.square.fill", value: .home) {
+            Tab("Home", systemImage: "house.fill", value: .home) {
                 if let userBinding = Binding($user) {
                     HomeView(
                         user: userBinding,

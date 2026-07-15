@@ -29,6 +29,8 @@ struct EveningJournalView: View {
 
     let day: Date
     let onCompleted: () -> Void
+    private let allowsDismissal: Bool
+    private let dismissesOnCompletion: Bool
 
     @State private var step: EveningJournalStep = .today
     @State private var todayNote = ""
@@ -42,9 +44,13 @@ struct EveningJournalView: View {
 
     init(
         day: Date = Date(),
+        allowsDismissal: Bool = true,
+        dismissesOnCompletion: Bool = true,
         onCompleted: @escaping () -> Void = {}
     ) {
         self.day = day
+        self.allowsDismissal = allowsDismissal
+        self.dismissesOnCompletion = dismissesOnCompletion
         self.onCompleted = onCompleted
     }
 
@@ -60,9 +66,11 @@ struct EveningJournalView: View {
             .navigationTitle("今日を閉じる")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("閉じる") {
-                        dismiss()
+                if allowsDismissal {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("閉じる") {
+                            dismiss()
+                        }
                     }
                 }
 
@@ -316,7 +324,9 @@ struct EveningJournalView: View {
         didComplete = true
         focusedField = nil
         onCompleted()
-        dismiss()
+        if dismissesOnCompletion {
+            dismiss()
+        }
     }
 }
 

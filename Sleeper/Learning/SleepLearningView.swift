@@ -52,17 +52,26 @@ struct SleepLearningView: View {
     private let targetSleepSessionID: UUID?
     private let onContinueToSleep: (() -> Void)?
     private let onOpenHistory: (() -> Void)?
+    private let onTestCompleted: (() -> Void)?
+    private let showsPhaseSelector: Bool
+    private let allowsTestSkipping: Bool
 
     init(
         phase: Binding<SleepLearningPhase> = .constant(.study),
         targetSleepSessionID: UUID? = nil,
+        showsPhaseSelector: Bool = true,
+        allowsTestSkipping: Bool = true,
         onContinueToSleep: (() -> Void)? = nil,
-        onOpenHistory: (() -> Void)? = nil
+        onOpenHistory: (() -> Void)? = nil,
+        onTestCompleted: (() -> Void)? = nil
     ) {
         _phase = phase
         self.targetSleepSessionID = targetSleepSessionID
+        self.showsPhaseSelector = showsPhaseSelector
+        self.allowsTestSkipping = allowsTestSkipping
         self.onContinueToSleep = onContinueToSleep
         self.onOpenHistory = onOpenHistory
+        self.onTestCompleted = onTestCompleted
     }
 
     var body: some View {
@@ -70,8 +79,10 @@ struct SleepLearningView: View {
             List {
                 statusMessages
 
-                Section("学習フェーズ") {
-                    phaseSelector
+                if showsPhaseSelector {
+                    Section("学習フェーズ") {
+                        phaseSelector
+                    }
                 }
 
                 switch phase {
@@ -626,11 +637,17 @@ struct SleepLearningView: View {
                         .foregroundStyle(.orange)
                 }
 
-                if let onOpenHistory {
+                if let onOpenHistory,
+                   allowsTestSkipping || quizDeck.count < 2 {
                     Button {
                         skipMorningTest(then: onOpenHistory)
                     } label: {
-                        Label("テストをスキップして記録へ", systemImage: "arrow.right")
+                        Label(
+                            quizDeck.count < 2
+                                ? "カードが足りないため記録へ"
+                                : "テストをスキップして記録へ",
+                            systemImage: "arrow.right"
+                        )
                     }
                 }
             } header: {
@@ -901,11 +918,14 @@ struct SleepLearningView: View {
                 selectedQuizOptionID = nil
             }
         } else {
-            learningStore.saveTestResult(
+            guard learningStore.saveTestResult(
                 correctAnswers: correctQuizAnswers,
                 totalQuestions: quizQuestions.count,
                 sleepSessionID: targetSleepSessionID
-            )
+            ) != nil else {
+                return
+            }
+            onTestCompleted?()
             withAnimation(.snappy) {
                 isQuizComplete = true
             }
@@ -929,6 +949,7 @@ struct SleepLearningView: View {
         ) != nil else {
             return
         }
+        onTestCompleted?()
         completion()
     }
 

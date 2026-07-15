@@ -7,6 +7,8 @@ struct MorningReflectionView: View {
 
     let sessionID: UUID
     private let onSaved: ((UUID) -> Void)?
+    private let allowsDismissal: Bool
+    private let dismissesOnSave: Bool
 
     @State private var selectedMood: SleepMood?
     @State private var note = ""
@@ -15,8 +17,15 @@ struct MorningReflectionView: View {
     private let moods: [SleepMood] = [.bad, .flat, .good, .great]
     private let noteLimit = 240
 
-    init(sessionID: UUID, onSaved: ((UUID) -> Void)? = nil) {
+    init(
+        sessionID: UUID,
+        allowsDismissal: Bool = true,
+        dismissesOnSave: Bool = true,
+        onSaved: ((UUID) -> Void)? = nil
+    ) {
         self.sessionID = sessionID
+        self.allowsDismissal = allowsDismissal
+        self.dismissesOnSave = dismissesOnSave
         self.onSaved = onSaved
     }
 
@@ -34,10 +43,12 @@ struct MorningReflectionView: View {
                         } description: {
                             Text("睡眠記録が削除されたか、まだ同期されていない可能性があります。")
                         } actions: {
-                            Button("閉じる") {
-                                dismiss()
+                            if allowsDismissal {
+                                Button("閉じる") {
+                                    dismiss()
+                                }
+                                .buttonStyle(.bordered)
                             }
-                            .buttonStyle(.bordered)
                         }
                     }
                 }
@@ -46,9 +57,11 @@ struct MorningReflectionView: View {
             .navigationTitle("朝の振り返り")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("閉じる") {
-                        dismiss()
+                if allowsDismissal {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("閉じる") {
+                            dismiss()
+                        }
                     }
                 }
 
@@ -161,6 +174,8 @@ struct MorningReflectionView: View {
             note: note.trimmingCharacters(in: .whitespacesAndNewlines)
         )
         onSaved?(sessionID)
-        dismiss()
+        if dismissesOnSave {
+            dismiss()
+        }
     }
 }

@@ -8,11 +8,14 @@
 import SwiftUI
 
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var user: AppUser?
     @State private var isRestoringSession = true
+    @State private var mandatoryFlowContext: MandatoryDailyFlowContext?
     @StateObject private var sleepStore = SleepStore()
     @StateObject private var learningStore = SleepLearningStore()
     @StateObject private var eveningStore = EveningStore()
+    @StateObject private var mandatoryFlowStore = MandatoryDailyFlowStore()
 
     var body: some View {
         Group {
@@ -24,6 +27,7 @@ struct ContentView: View {
                     .environmentObject(sleepStore)
                     .environmentObject(learningStore)
                     .environmentObject(eveningStore)
+                    .environmentObject(mandatoryFlowStore)
                     .transition(.opacity)
             } else {
                 LoginScreen(user: loginUser)
@@ -36,7 +40,23 @@ struct ContentView: View {
             await restoreSession()
         }
         .task(id: user) {
+            refreshMandatoryFlow(for: user)
             await synchronizeSleepStore(for: user)
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            refreshMandatoryFlow(for: user)
+        }
+        .fullScreenCover(item: $mandatoryFlowContext) { context in
+            MandatoryDailyFlowGateView(context: context) {
+                mandatoryFlowContext = nil
+            }
+            .id(context.id)
+            .environmentObject(sleepStore)
+            .environmentObject(learningStore)
+            .environmentObject(eveningStore)
+            .environmentObject(mandatoryFlowStore)
+            .interactiveDismissDisabled()
         }
     }
 
@@ -47,6 +67,7 @@ struct ContentView: View {
             get: { user },
             set: { updatedUser in
                 if updatedUser == nil, user != nil {
+                    mandatoryFlowContext = nil
                     do {
                         try AuthenticationService.signOut()
                     } catch {
@@ -61,6 +82,7 @@ struct ContentView: View {
                     sleepStore.activateProfile(updatedUser.id)
                     learningStore.activateProfile(updatedUser.id)
                     eveningStore.activateProfile(updatedUser.id)
+                    mandatoryFlowStore.activateProfile(updatedUser.id)
                 }
                 user = updatedUser
             }
@@ -76,6 +98,7 @@ struct ContentView: View {
                     sleepStore.activateProfile(signedInUser.id)
                     learningStore.activateProfile(signedInUser.id)
                     eveningStore.activateProfile(signedInUser.id)
+                    mandatoryFlowStore.activateProfile(signedInUser.id)
                 }
                 user = signedInUser
             }
@@ -97,9 +120,11 @@ struct ContentView: View {
             sleepStore.activateProfile(restoredUser.id)
             learningStore.activateProfile(restoredUser.id)
             eveningStore.activateProfile(restoredUser.id)
+            mandatoryFlowStore.activateProfile(restoredUser.id)
         }
         user = restoredUser
         isRestoringSession = false
+        refreshMandatoryFlow(for: restoredUser)
     }
 
     private func synchronizeSleepStore(for user: AppUser?) async {
@@ -114,6 +139,25 @@ struct ContentView: View {
         if self.user != user {
             sleepStore.disconnectFirestore()
         }
+    }
+
+    private func refreshMandatoryFlow(
+        for user: AppUser?,
+        now: Date = Date()
+    ) {
+        guard let user else {
+            mandatoryFlowContext = nil
+            return
+        }
+
+        mandatoryFlowStore.activateProfile(user.id)
+        let context = MandatoryDailyFlowContext(
+            profileID: user.id,
+            now: now
+        )
+        mandatoryFlowContext = mandatoryFlowStore.isCompleted(context)
+            ? nil
+            : context
     }
 }
 
