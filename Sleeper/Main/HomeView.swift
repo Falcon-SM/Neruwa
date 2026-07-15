@@ -17,6 +17,8 @@ struct HomeView: View {
     @Binding var user: AppUser
     @Binding var selectedTab: MainTab
 
+    private let now: Date
+    private let calendar: Calendar
     private let onStartEveningFlow: () -> Void
     private let onResumeReflection: (UUID) -> Void
     private let onOpenLearning: (SleepLearningPhase, UUID?) -> Void
@@ -27,6 +29,8 @@ struct HomeView: View {
     init(
         user: Binding<AppUser>,
         selectedTab: Binding<MainTab>,
+        now: Date = .now,
+        calendar: Calendar = .current,
         onStartEveningFlow: @escaping () -> Void = {},
         onResumeReflection: @escaping (UUID) -> Void = { _ in },
         onOpenLearning: @escaping (SleepLearningPhase, UUID?) -> Void = { _, _ in },
@@ -34,6 +38,8 @@ struct HomeView: View {
     ) {
         _user = user
         _selectedTab = selectedTab
+        self.now = now
+        self.calendar = calendar
         self.onStartEveningFlow = onStartEveningFlow
         self.onResumeReflection = onResumeReflection
         self.onOpenLearning = onOpenLearning
@@ -46,15 +52,18 @@ struct HomeView: View {
 
     private var latestTodaySession: SleepSession? {
         sleepStore.sessions
-            .filter { Calendar.current.isDateInToday($0.wakeDay) }
+            .filter { calendar.isDate($0.endDate, inSameDayAs: now) }
             .max(by: { $0.endDate < $1.endDate })
     }
 
     private var morningFlowSession: SleepSession? {
-        let hour = Calendar.current.component(.hour, from: .now)
-        guard hour < 17 else { return nil }
+        guard dailyFlowPeriod == .morning else { return nil }
         guard let session = latestTodaySession else { return nil }
         return session
+    }
+
+    private var dailyFlowPeriod: DailyFlowPeriod {
+        DailyFlowPeriod(date: now, calendar: calendar)
     }
 
     private func morningTestResult(for sessionID: UUID) -> LearningTestResult? {
@@ -64,12 +73,15 @@ struct HomeView: View {
     }
 
     private var weeklySummary: WeeklySummary {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: .now)
+        let today = calendar.startOfDay(for: now)
         let start = calendar.date(byAdding: .day, value: -6, to: today) ?? today
-        let sessions = sleepStore.sessions.filter { $0.wakeDay >= start }
+        let sessions = sleepStore.sessions.filter {
+            $0.endDate >= start && $0.endDate <= now
+        }
 
-        let totalsByDay = Dictionary(grouping: sessions, by: \.wakeDay)
+        let totalsByDay = Dictionary(grouping: sessions) {
+            calendar.startOfDay(for: $0.endDate)
+        }
             .mapValues { sessions in
                 sessions.map(\.durationMinutes).reduce(0, +)
             }
@@ -86,8 +98,8 @@ struct HomeView: View {
     var body: some View {
         NavigationStack {
             List {
-                welcomeSection
                 dailyFlowSection
+                welcomeSection
                 tonightSection
                 recentSleepSection
                 weeklySection
@@ -109,7 +121,9 @@ struct HomeView: View {
 
     private var dailyFlowSection: some View {
         Section {
-            if let session = morningFlowSession {
+            if dailyFlowPeriod == .night {
+                nightFlowContent
+            } else if let session = morningFlowSession {
                 let testResult = morningTestResult(for: session.id)
                 flowStepRow(
                     title: "今朝の気分",
@@ -137,40 +151,28 @@ struct HomeView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
             } else {
-                let journalComplete = eveningStore.entry(for: .now)?.completedAt != nil
-
                 flowStepRow(
-                    title: "今日を閉じる",
-                    detail: journalComplete ? "日記を保存済み" : "今日・手放す・明日の3つ",
-                    systemImage: "square.and.pencil",
-                    isComplete: journalComplete
-                )
-                flowStepRow(
-                    title: "点字を学ぶ",
-                    detail: "カードと睡眠音声",
-                    systemImage: "book.fill",
+                    title: "昨夜の睡眠を記録",
+                    detail: sleepStore.activeTimerStartedAt == nil
+                        ? "タイマーまたは手入力で追加してください"
+                        : "睡眠タイマーを停止して記録を完成させてください",
+                    systemImage: "moon.zzz.fill",
                     isComplete: false
                 )
                 flowStepRow(
-                    title: "睡眠を記録",
-                    detail: sleepStore.activeTimerStartedAt == nil ? "タイマーまたは手入力" : "タイマー計測中",
-                    systemImage: "moon.zzz.fill",
-                    isComplete: sleepStore.activeTimerStartedAt != nil
+                    title: "朝の振り返り",
+                    detail: "睡眠記録のあとに、気分 → 点字テスト → 記録へ進みます",
+                    systemImage: "sunrise.fill",
+                    isComplete: false
                 )
 
                 Button {
-                    if sleepStore.activeTimerStartedAt != nil {
-                        selectedTab = .sleep
-                    } else if journalComplete {
-                        onOpenLearning(.study, nil)
-                    } else {
-                        onStartEveningFlow()
-                    }
+                    selectedTab = .sleep
                 } label: {
                     Label(
                         sleepStore.activeTimerStartedAt != nil
                             ? "睡眠タイマーを確認"
-                            : (journalComplete ? "点字学習へ" : "今日を閉じる"),
+                            : "睡眠を記録",
                         systemImage: "arrow.right.circle.fill"
                     )
                     .frame(maxWidth: .infinity)
@@ -179,18 +181,72 @@ struct HomeView: View {
                 .controlSize(.large)
             }
         } header: {
-            Text(morningFlowSession == nil ? "夜の流れ" : "朝の流れ")
+            Text(dailyFlowPeriod.title)
+                .accessibilityLabel("\(dailyFlowPeriod.title)、\(dailyFlowPeriod.accessibilityTimeRange)")
         } footer: {
-            Text(morningFlowSession == nil
-                 ? "日記 → 学ぶ → 睡眠音声 → 睡眠記録の順で進めます。"
-                 : "気分 → 朝テスト → 記録の順で進めます。")
+            Text(dailyFlowFooterText)
         }
+    }
+
+    private var dailyFlowFooterText: String {
+        if dailyFlowPeriod == .night {
+            return "日記 → 学ぶ → 睡眠音声 → 睡眠記録の順で進めます。"
+        }
+        if morningFlowSession == nil {
+            return "睡眠記録を追加すると、気分 → 朝テスト → 記録へ進めます。"
+        }
+        return "気分 → 朝テスト → 記録の順で進めます。"
+    }
+
+    @ViewBuilder
+    private var nightFlowContent: some View {
+        let journalDay = DailyFlowPeriod.nightFlowDay(containing: now, calendar: calendar)
+        let journalComplete = eveningStore.entry(for: journalDay, calendar: calendar)?.completedAt != nil
+
+        flowStepRow(
+            title: "今日を閉じる",
+            detail: journalComplete ? "日記を保存済み" : "今日・手放す・明日の3つ",
+            systemImage: "square.and.pencil",
+            isComplete: journalComplete
+        )
+        flowStepRow(
+            title: "点字を学ぶ",
+            detail: "カードと睡眠音声",
+            systemImage: "book.fill",
+            isComplete: false
+        )
+        flowStepRow(
+            title: "睡眠を記録",
+            detail: sleepStore.activeTimerStartedAt == nil ? "タイマーまたは手入力" : "タイマー計測中",
+            systemImage: "moon.zzz.fill",
+            isComplete: sleepStore.activeTimerStartedAt != nil
+        )
+
+        Button {
+            if sleepStore.activeTimerStartedAt != nil {
+                selectedTab = .sleep
+            } else if journalComplete {
+                onOpenLearning(.study, nil)
+            } else {
+                onStartEveningFlow()
+            }
+        } label: {
+            Label(
+                sleepStore.activeTimerStartedAt != nil
+                    ? "睡眠タイマーを確認"
+                    : (journalComplete ? "点字学習へ" : "今日を閉じる"),
+                systemImage: "arrow.right.circle.fill"
+            )
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
     }
 
     private var welcomeSection: some View {
         Section {
             VStack(alignment: .leading, spacing: 6) {
-                Text(Date.now.formatted(date: .long, time: .omitted))
+                Text(now.formatted(date: .long, time: .omitted))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
@@ -329,16 +385,19 @@ struct HomeView: View {
     }
 
     private var greeting: String {
-        let hour = Calendar.current.component(.hour, from: .now)
+        let hour = calendar.component(.hour, from: now)
         if hour < 11 { return "おはよう、\(user.name)さん" }
         if hour < 17 { return "こんにちは、\(user.name)さん" }
         return "こんばんは、\(user.name)さん"
     }
 
     private var streak: Int {
-        let calendar = Calendar.current
-        let recordedDays = Set(sleepStore.sessions.map(\.wakeDay))
-        var cursor = calendar.startOfDay(for: .now)
+        let recordedDays = Set(
+            sleepStore.sessions
+                .filter { $0.endDate <= now }
+                .map { calendar.startOfDay(for: $0.endDate) }
+        )
+        var cursor = calendar.startOfDay(for: now)
 
         if !recordedDays.contains(cursor) {
             cursor = calendar.date(byAdding: .day, value: -1, to: cursor) ?? cursor

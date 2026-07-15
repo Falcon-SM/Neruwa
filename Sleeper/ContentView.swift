@@ -13,7 +13,6 @@ struct ContentView: View {
     @StateObject private var sleepStore = SleepStore()
     @StateObject private var learningStore = SleepLearningStore()
     @StateObject private var eveningStore = EveningStore()
-    @StateObject private var ambientStore = AmbientEnvironmentStore()
 
     var body: some View {
         Group {
@@ -25,7 +24,6 @@ struct ContentView: View {
                     .environmentObject(sleepStore)
                     .environmentObject(learningStore)
                     .environmentObject(eveningStore)
-                    .environmentObject(ambientStore)
                     .transition(.opacity)
             } else {
                 LoginScreen(user: loginUser)

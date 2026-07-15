@@ -18,23 +18,18 @@ struct MainView: View {
         let id: UUID
     }
 
-    private struct AmbientRefreshToken: Equatable {
-        let scenePhase: ScenePhase
-        let weatherEnabled: Bool
-        let lastUpdatedAt: Date?
-    }
-
     @EnvironmentObject private var sleepStore: SleepStore
     @EnvironmentObject private var eveningStore: EveningStore
-    @EnvironmentObject private var ambientStore: AmbientEnvironmentStore
     @Environment(\.scenePhase) private var scenePhase
     @Binding var user: AppUser?
     @State private var selectedTab: MainTab = .home
+    @State private var flowNow = Date()
     @State private var learningPhase: SleepLearningPhase = .study
     @State private var isSettingsPresented = false
     @State private var isEveningJournalPresented = false
     @State private var reflectionTarget: ReflectionTarget?
     @State private var morningTestSessionID: UUID?
+    @State private var shouldRouteHomeOnActivation = false
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -43,6 +38,7 @@ struct MainView: View {
                     HomeView(
                         user: userBinding,
                         selectedTab: $selectedTab,
+                        now: flowNow,
                         onStartEveningFlow: {
                             isEveningJournalPresented = true
                         },
@@ -96,24 +92,21 @@ struct MainView: View {
                 }
             }
         }
-        .environment(\.ambientScene, ambientStore.scene)
+        .environment(\.ambientScene, ambientScene)
         .tint(.indigo)
         .tabViewStyle(.sidebarAdaptable)
         .tabBarMinimizeBehavior(.onScrollDown)
-        .preferredColorScheme(ambientStore.scene.isNight ? ColorScheme.dark : nil)
+        .preferredColorScheme(ambientScene.isNight ? ColorScheme.dark : nil)
         .onChange(of: learningPhase) { _, newPhase in
             if newPhase == .test, morningTestSessionID == nil {
                 morningTestSessionID = latestTodaySessionID
             }
         }
-        .task(id: ambientRefreshToken) {
-            await refreshAmbientWhileActive()
+        .onChange(of: scenePhase) { _, newPhase in
+            handleScenePhaseChange(newPhase)
         }
-        .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 0) {
-            if ambientStore.usesWeatherData {
-                WeatherAttributionView(attribution: ambientStore.attribution)
-                    .padding(.trailing, 12)
-            }
+        .task(id: scenePhase) {
+            await keepClockCurrentWhileActive()
         }
         .sheet(isPresented: $isSettingsPresented) {
             if let userBinding = Binding($user) {
@@ -126,11 +119,10 @@ struct MainView: View {
                 )
                 .environmentObject(sleepStore)
                 .environmentObject(eveningStore)
-                .environmentObject(ambientStore)
             }
         }
         .sheet(isPresented: $isEveningJournalPresented) {
-            EveningJournalView {
+            EveningJournalView(day: nightFlowDay) {
                 learningPhase = .study
                 morningTestSessionID = nil
                 selectedTab = .learning
@@ -168,7 +160,7 @@ struct MainView: View {
     private var latestTodaySessionID: UUID? {
         let calendar = Calendar.current
         return sleepStore.sessions
-            .filter { calendar.isDateInToday($0.wakeDay) }
+            .filter { calendar.isDate($0.wakeDay, inSameDayAs: flowNow) }
             .max(by: { $0.endDate < $1.endDate })?
             .id
     }
@@ -186,23 +178,38 @@ struct MainView: View {
         selectedTab = .history
     }
 
-    private var ambientRefreshToken: AmbientRefreshToken {
-        AmbientRefreshToken(
-            scenePhase: scenePhase,
-            weatherEnabled: ambientStore.weatherEnabled,
-            lastUpdatedAt: ambientStore.lastUpdatedAt
-        )
+    private var ambientScene: AmbientScene {
+        AmbientScene.timeFallback(at: flowNow)
     }
 
-    private func refreshAmbientWhileActive() async {
+    private var nightFlowDay: Date {
+        DailyFlowPeriod.nightFlowDay(containing: flowNow)
+    }
+
+    private func handleScenePhaseChange(_ newPhase: ScenePhase) {
+        switch newPhase {
+        case .background:
+            shouldRouteHomeOnActivation = true
+        case .active where shouldRouteHomeOnActivation:
+            flowNow = Date()
+            selectedTab = .home
+            shouldRouteHomeOnActivation = false
+        default:
+            break
+        }
+    }
+
+    private func keepClockCurrentWhileActive() async {
         guard scenePhase == .active else { return }
 
         while !Task.isCancelled {
-            ambientStore.refreshIfNeeded()
+            let currentDate = Date()
+            let calendar = Calendar.current
 
-            let now = Date()
-            let nextRefresh = ambientStore.nextAutomaticRefreshDate(after: now)
-            let delay = max(1, nextRefresh.timeIntervalSince(now))
+            flowNow = currentDate
+
+            let nextUpdate = nextClockUpdate(after: currentDate, calendar: calendar)
+            let delay = max(1, nextUpdate.timeIntervalSince(currentDate))
 
             do {
                 try await Task.sleep(for: .seconds(delay))
@@ -210,6 +217,19 @@ struct MainView: View {
                 return
             }
         }
+    }
+
+    private func nextClockUpdate(after date: Date, calendar: Calendar) -> Date {
+        [0, 5, 9, 11, 17, 19]
+            .compactMap { hour in
+                calendar.nextDate(
+                    after: date,
+                    matching: DateComponents(hour: hour, minute: 0, second: 0),
+                    matchingPolicy: .nextTime
+                )
+            }
+            .min()
+            ?? date.addingTimeInterval(60 * 60)
     }
 }
 
@@ -227,5 +247,4 @@ private struct MissingUserView: View {
         .environmentObject(SleepStore())
         .environmentObject(SleepLearningStore())
         .environmentObject(EveningStore())
-        .environmentObject(AmbientEnvironmentStore())
 }

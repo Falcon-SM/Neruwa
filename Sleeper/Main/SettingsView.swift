@@ -8,7 +8,6 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var sleepStore: SleepStore
     @EnvironmentObject private var eveningStore: EveningStore
-    @EnvironmentObject private var ambientStore: AmbientEnvironmentStore
     @Binding var user: AppUser
 
     @AppStorage("sleepTargetMinutes") private var targetMinutes = 480
@@ -25,7 +24,6 @@ struct SettingsView: View {
             Form {
                 profileSection
                 sleepGoalSection
-                backgroundSection
                 healthSection
                 dataSection
                 accountSection
@@ -154,57 +152,6 @@ struct SettingsView: View {
         }
     }
 
-    private var backgroundSection: some View {
-        Section {
-            Toggle(
-                isOn: Binding(
-                    get: { ambientStore.weatherEnabled },
-                    set: { ambientStore.setWeatherEnabledFromUserAction($0) }
-                )
-            ) {
-                Label("現在地の天気に合わせる", systemImage: "cloud.sun.fill")
-            }
-
-            LabeledContent {
-                if ambientStore.isRefreshing {
-                    ProgressView()
-                        .controlSize(.small)
-                }
-            } label: {
-                Label(
-                    ambientStore.weatherStatus.message,
-                    systemImage: ambientStore.weatherStatus.systemImage
-                )
-                .foregroundStyle(.secondary)
-            }
-
-            if ambientStore.weatherEnabled {
-                Button {
-                    ambientStore.refreshIfNeeded(force: true)
-                } label: {
-                    Label("天気を更新", systemImage: "arrow.clockwise")
-                }
-                .disabled(ambientStore.isRefreshing)
-            }
-
-            if let lastUpdatedAt = ambientStore.lastUpdatedAt {
-                LabeledContent("最終更新") {
-                    Text(lastUpdatedAt, style: .relative)
-                }
-            }
-
-            WeatherAttributionView(
-                attribution: ambientStore.usesWeatherData
-                    ? ambientStore.attribution
-                    : nil
-            )
-        } header: {
-            Text("背景")
-        } footer: {
-            Text("夜は星空、朝から昼は時刻に合わせた空を表示します。天気連動は継続追跡せず、更新時に現在地を一度だけ取得します。位置は保存・共有しません。")
-        }
-    }
-
     private var dataSection: some View {
         Group {
             Section("睡眠記録データ") {
@@ -282,5 +229,4 @@ struct SettingsView: View {
     SettingsView(user: .constant(.guest), onLogout: {})
         .environmentObject(SleepStore())
         .environmentObject(EveningStore())
-        .environmentObject(AmbientEnvironmentStore())
 }
