@@ -9,6 +9,255 @@ private struct HistoryDayPoint: Identifiable {
     var id: Date { day }
 }
 
+private struct HistoryCalendarDaySummary {
+    var totalMinutes = 0
+    var representativeMood: SleepMood?
+    var latestMoodDate: Date?
+}
+
+private struct HistoryMonthCalendar: View {
+    let displayedMonth: Date
+    let selectedDay: Date
+    let sessions: [SleepSession]
+    let calendar: Calendar
+    let onSelectDay: (Date) -> Void
+    let onMoveMonth: (Int) -> Void
+    let onShowToday: () -> Void
+
+    private let gridSpacing: CGFloat = 4
+
+    private var monthStart: Date {
+        calendar.dateInterval(of: .month, for: displayedMonth)?.start
+            ?? calendar.startOfDay(for: displayedMonth)
+    }
+
+    private var currentMonthStart: Date {
+        calendar.dateInterval(of: .month, for: Date())?.start
+            ?? calendar.startOfDay(for: Date())
+    }
+
+    private var canMoveToNextMonth: Bool {
+        calendar.compare(monthStart, to: currentMonthStart, toGranularity: .month) == .orderedAscending
+    }
+
+    private var isShowingToday: Bool {
+        calendar.isDate(displayedMonth, equalTo: Date(), toGranularity: .month)
+            && calendar.isDateInToday(selectedDay)
+    }
+
+    private var weekdaySymbols: [String] {
+        let symbols = calendar.veryShortStandaloneWeekdaySymbols
+        return (0..<7).map { offset in
+            symbols[(calendar.firstWeekday - 1 + offset) % symbols.count]
+        }
+    }
+
+    private var monthCells: [Date?] {
+        guard let range = calendar.range(of: .day, in: .month, for: monthStart) else {
+            return []
+        }
+
+        let firstWeekday = calendar.component(.weekday, from: monthStart)
+        let leadingBlankCount = (firstWeekday - calendar.firstWeekday + 7) % 7
+        var cells = Array<Date?>(repeating: nil, count: leadingBlankCount)
+        cells += range.compactMap { day in
+            calendar.date(byAdding: .day, value: day - 1, to: monthStart)
+        }
+
+        while cells.count.isMultiple(of: 7) == false {
+            cells.append(nil)
+        }
+        return cells
+    }
+
+    private var summariesByDay: [Date: HistoryCalendarDaySummary] {
+        var summaries: [Date: HistoryCalendarDaySummary] = [:]
+
+        for session in sessions {
+            let day = calendar.startOfDay(for: session.wakeDay)
+            guard calendar.isDate(day, equalTo: monthStart, toGranularity: .month) else {
+                continue
+            }
+
+            var summary = summaries[day, default: HistoryCalendarDaySummary()]
+            summary.totalMinutes += session.durationMinutes
+            if let mood = session.mood {
+                let shouldReplaceMood = summary.latestMoodDate.map { session.endDate > $0 } ?? true
+                if shouldReplaceMood {
+                    summary.representativeMood = mood
+                    summary.latestMoodDate = session.endDate
+                }
+            }
+            summaries[day] = summary
+        }
+        return summaries
+    }
+
+    var body: some View {
+        let summaries = summariesByDay
+
+        VStack(spacing: 10) {
+            monthHeader
+
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: gridSpacing), count: 7),
+                spacing: gridSpacing
+            ) {
+                ForEach(Array(weekdaySymbols.enumerated()), id: \.offset) { _, symbol in
+                    Text(symbol)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .accessibilityHidden(true)
+                }
+
+                ForEach(Array(monthCells.enumerated()), id: \.offset) { _, date in
+                    if let date {
+                        dayButton(
+                            date,
+                            summary: summaries[calendar.startOfDay(for: date)]
+                        )
+                    } else {
+                        Color.clear
+                            .frame(minHeight: 52)
+                            .accessibilityHidden(true)
+                    }
+                }
+            }
+        }
+    }
+
+    private var monthHeader: some View {
+        HStack(spacing: 4) {
+            Button {
+                onMoveMonth(-1)
+            } label: {
+                Image(systemName: "chevron.left")
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("前の月")
+
+            Text(monthStart, format: .dateTime.year().month(.wide))
+                .font(.headline)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+
+            Spacer(minLength: 4)
+
+            Button("今日", action: onShowToday)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(isShowingToday)
+
+            Button {
+                onMoveMonth(1)
+            } label: {
+                Image(systemName: "chevron.right")
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .disabled(!canMoveToNextMonth)
+            .accessibilityLabel("次の月")
+            .accessibilityHint(canMoveToNextMonth ? "" : "未来の月は表示できません")
+        }
+    }
+
+    private func dayButton(
+        _ day: Date,
+        summary: HistoryCalendarDaySummary?
+    ) -> some View {
+        let isFuture = day > calendar.startOfDay(for: Date())
+        let isSelected = calendar.isDate(day, inSameDayAs: selectedDay)
+        let isToday = calendar.isDateInToday(day)
+        let tint = moodColor(summary?.representativeMood)
+
+        return Button {
+            onSelectDay(day)
+        } label: {
+            VStack(spacing: 2) {
+                Text(day, format: .dateTime.day())
+                    .font(.caption.weight(isToday || isSelected ? .bold : .medium))
+                    .foregroundStyle(isToday ? Color.accentColor : .primary)
+                    .monospacedDigit()
+
+                if let summary {
+                    Text(shortDuration(summary.totalMinutes))
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(tint)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.65)
+                } else {
+                    Text(" ")
+                        .font(.caption2)
+                        .accessibilityHidden(true)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 52)
+            .background {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(
+                        summary == nil
+                            ? Color.secondary.opacity(0.055)
+                            : tint.opacity(0.16)
+                    )
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(
+                        isSelected ? Color.accentColor : tint.opacity(summary == nil ? 0 : 0.42),
+                        lineWidth: isSelected ? 2 : 1
+                    )
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(isFuture)
+        .opacity(isFuture ? 0.32 : 1)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(day.formatted(.dateTime.month().day().weekday(.wide)))
+        .accessibilityValue(accessibilityValue(for: summary))
+        .accessibilityHint("タップするとこの日の詳細を表示します")
+    }
+
+    private func shortDuration(_ minutes: Int) -> String {
+        let hours = minutes / 60
+        let remainingMinutes = minutes % 60
+        if hours == 0 {
+            return "\(remainingMinutes)m"
+        }
+        if remainingMinutes == 0 {
+            return "\(hours)h"
+        }
+        return "\(hours)h\(remainingMinutes)"
+    }
+
+    private func moodColor(_ mood: SleepMood?) -> Color {
+        switch mood {
+        case .bad:
+            .red
+        case .flat:
+            .orange
+        case .good:
+            .green
+        case .great:
+            .blue
+        case nil:
+            .secondary
+        }
+    }
+
+    private func accessibilityValue(for summary: HistoryCalendarDaySummary?) -> String {
+        guard let summary else { return "睡眠記録なし" }
+        let duration = SleepDurationFormatter.summary(minutes: summary.totalMinutes)
+        if let mood = summary.representativeMood {
+            return "睡眠時間\(duration)、気分は\(mood.label)"
+        }
+        return "睡眠時間\(duration)、気分は未記録"
+    }
+}
+
 private enum HealthMoodLoadState {
     case notRequested
     case loading
@@ -32,7 +281,10 @@ struct HistoryView: View {
     @AppStorage("sleepTargetMinutes") private var defaultTargetMinutes = 480
 
     @State private var selectedDate = Calendar.current.startOfDay(for: Date())
+    @State private var displayedMonth = Date()
+    @State private var isDayDetailPresented = false
     @State private var reflectionTarget: ReflectionTarget?
+    @State private var pendingReflectionTarget: ReflectionTarget?
     @State private var pendingDeletionID: UUID?
     @State private var healthMoodLoadState: HealthMoodLoadState = .notRequested
     @State private var healthMoodEnabled = false
@@ -102,27 +354,13 @@ struct HistoryView: View {
                 statusMessages
 
                 calendarSection
-
-                sleepSummarySection
-
-                moodSection
-
-                trendSection
             }
             .listStyle(.insetGrouped)
+            .scrollBounceBehavior(.basedOnSize)
             .scrollContentBackground(.hidden)
             .ambientScreenBackground()
             .navigationTitle("睡眠の記録")
             .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                if !calendar.isDateInToday(selectedDay) {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("今日") {
-                            selectedDate = calendar.startOfDay(for: Date())
-                        }
-                    }
-                }
-            }
             .refreshable {
                 guard healthMoodEnabled else { return }
                 healthMoodReloadToken += 1
@@ -138,35 +376,17 @@ struct HistoryView: View {
             guard healthMoodEnabled else { return }
             await loadHealthMood(for: selectedDay)
         }
-        .sheet(item: $reflectionTarget) { target in
-            MorningReflectionView(sessionID: target.id)
-                .environmentObject(sleepStore)
+        .sheet(
+            isPresented: $isDayDetailPresented,
+            onDismiss: presentPendingReflection
+        ) {
+            dayDetailView
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
-        .confirmationDialog(
-            "睡眠記録を削除",
-            isPresented: Binding(
-                get: { pendingDeletionID != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        pendingDeletionID = nil
-                    }
-                }
-            ),
-            titleVisibility: .visible
-        ) {
-            if let sessionID = pendingDeletionID {
-                Button("削除", role: .destructive) {
-                    sleepStore.delete(id: sessionID)
-                    pendingDeletionID = nil
-                }
-            }
-            Button("キャンセル", role: .cancel) {
-                pendingDeletionID = nil
-            }
-        } message: {
-            Text("この操作は取り消せません。")
+        .fullScreenCover(item: $reflectionTarget) { target in
+            MorningReflectionView(sessionID: target.id)
+                .environmentObject(sleepStore)
         }
     }
 
@@ -187,36 +407,70 @@ struct HistoryView: View {
 
     private var calendarSection: some View {
         Section {
-            DatePicker(
-                "日付",
-                selection: $selectedDate,
-                in: ...Date(),
-                displayedComponents: .date
+            HistoryMonthCalendar(
+                displayedMonth: displayedMonth,
+                selectedDay: selectedDay,
+                sessions: sleepStore.sessions,
+                calendar: calendar,
+                onSelectDay: selectDay,
+                onMoveMonth: moveDisplayedMonth,
+                onShowToday: showToday
             )
-            .datePickerStyle(.graphical)
-            .labelsHidden()
-            .accessibilityLabel("記録を表示する日")
-
-            LabeledContent {
-                if selectedSessions.isEmpty {
-                    Text("記録なし")
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("\(selectedSessions.count)件")
-                        .monospacedDigit()
-                }
-            } label: {
-                Label(
-                    selectedDay.formatted(.dateTime.month().day().weekday(.wide)),
-                    systemImage: selectedSessions.isEmpty
-                        ? "calendar"
-                        : "calendar.badge.checkmark"
-                )
-            }
+            .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 10, trailing: 12))
         } header: {
             Text("カレンダー")
         } footer: {
-            Text("起きた日を選ぶと、その日の睡眠と気分を一緒に確認できます。")
+            Label(
+                "日付をタップすると詳細を確認できます。背景色は最新の気分を表し、赤＝つらい、橙＝ふつう、緑＝いい、青＝最高です。",
+                systemImage: "hand.tap"
+            )
+        }
+    }
+
+    private var dayDetailView: some View {
+        NavigationStack {
+            List {
+                sleepSummarySection
+                moodSection
+                trendSection
+            }
+            .listStyle(.insetGrouped)
+            .scrollBounceBehavior(.basedOnSize)
+            .scrollContentBackground(.hidden)
+            .ambientScreenBackground()
+            .navigationTitle(selectedDay.formatted(.dateTime.month().day().weekday(.wide)))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("閉じる") {
+                        isDayDetailPresented = false
+                    }
+                }
+            }
+            .confirmationDialog(
+                "睡眠記録を削除",
+                isPresented: Binding(
+                    get: { pendingDeletionID != nil },
+                    set: { isPresented in
+                        if !isPresented {
+                            pendingDeletionID = nil
+                        }
+                    }
+                ),
+                titleVisibility: .visible
+            ) {
+                if let sessionID = pendingDeletionID {
+                    Button("削除", role: .destructive) {
+                        sleepStore.delete(id: sessionID)
+                        pendingDeletionID = nil
+                    }
+                }
+                Button("キャンセル", role: .cancel) {
+                    pendingDeletionID = nil
+                }
+            } message: {
+                Text("この操作は取り消せません。")
+            }
         }
     }
 
@@ -230,16 +484,31 @@ struct HistoryView: View {
                 }
                 .accessibilityElement(children: .combine)
             } else {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(SleepDurationFormatter.compact(minutes: selectedTotalMinutes))
-                        .font(.system(.largeTitle, design: .rounded, weight: .semibold))
-                        .monospacedDigit()
-                    Text("この日の合計睡眠時間")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                HStack(spacing: 18) {
+                    SleepDurationClockDial(
+                        elapsed: TimeInterval(selectedTotalMinutes * 60),
+                        displaysSecondHand: false
+                    )
+                    .frame(width: 112, height: 112)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(SleepDurationFormatter.compact(minutes: selectedTotalMinutes))
+                            .font(.system(.title, design: .rounded, weight: .semibold))
+                            .monospacedDigit()
+                        Text("この日の合計睡眠時間")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Text("\(selectedSessions.count)件の記録")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                .padding(.vertical, 6)
-                .accessibilityElement(children: .combine)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 4)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(
+                    "この日の合計睡眠時間、\(SleepDurationFormatter.summary(minutes: selectedTotalMinutes))、\(selectedSessions.count)件の記録"
+                )
 
                 LabeledContent("目標") {
                     Text(SleepDurationFormatter.compact(minutes: selectedTargetMinutes))
@@ -264,7 +533,7 @@ struct HistoryView: View {
                     sleepRecordRow(session)
                         .swipeActions(edge: .leading, allowsFullSwipe: false) {
                             Button {
-                                reflectionTarget = ReflectionTarget(id: session.id)
+                                requestReflection(for: session.id)
                             } label: {
                                 Label(
                                     session.mood == nil ? "振り返る" : "編集",
@@ -293,7 +562,7 @@ struct HistoryView: View {
             if let session = selectedSessions.first(where: { $0.mood != nil }),
                let mood = session.mood {
                 Button {
-                    reflectionTarget = ReflectionTarget(id: session.id)
+                    requestReflection(for: session.id)
                 } label: {
                     LabeledContent {
                         Text("\(mood.emoji)  \(mood.label)")
@@ -304,7 +573,7 @@ struct HistoryView: View {
                 .buttonStyle(.plain)
             } else if let session = selectedSessions.first {
                 Button {
-                    reflectionTarget = ReflectionTarget(id: session.id)
+                    requestReflection(for: session.id)
                 } label: {
                     Label("朝の気分を追加", systemImage: "plus.circle")
                 }
@@ -421,7 +690,7 @@ struct HistoryView: View {
 
     private func sleepRecordRow(_ session: SleepSession) -> some View {
         Button {
-            reflectionTarget = ReflectionTarget(id: session.id)
+            requestReflection(for: session.id)
         } label: {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .firstTextBaseline) {
@@ -445,17 +714,31 @@ struct HistoryView: View {
                         .lineLimit(2)
                 }
 
+                if let mood = session.mood {
+                    Label("\(mood.emoji)  \(mood.label)", systemImage: "face.smiling")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 if !session.note.isEmpty {
                     Label(session.note, systemImage: "quote.opening")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
+
+                Label("タップして詳細・編集", systemImage: "chevron.forward")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
             .padding(.vertical, 2)
         }
         .buttonStyle(.plain)
-        .accessibilityHint(session.mood == nil ? "朝の気分を追加します" : "振り返りを編集します")
+        .accessibilityHint(
+            session.mood == nil
+                ? "睡眠の詳細を表示して朝の気分を追加します"
+                : "睡眠の詳細を表示して振り返りを編集します"
+        )
     }
 
     private func healthMoodRow(_ entry: HealthKitStateOfMindData) -> some View {
@@ -491,6 +774,41 @@ struct HistoryView: View {
             }
         }
         .padding(.vertical, 3)
+    }
+
+    private func selectDay(_ day: Date) {
+        guard day <= calendar.startOfDay(for: Date()) else { return }
+        selectedDate = calendar.startOfDay(for: day)
+        isDayDetailPresented = true
+    }
+
+    private func moveDisplayedMonth(_ offset: Int) {
+        guard let start = calendar.dateInterval(of: .month, for: displayedMonth)?.start,
+              let nextMonth = calendar.date(byAdding: .month, value: offset, to: start) else {
+            return
+        }
+
+        let currentMonth = calendar.dateInterval(of: .month, for: Date())?.start
+            ?? calendar.startOfDay(for: Date())
+        guard nextMonth <= currentMonth else { return }
+        displayedMonth = nextMonth
+    }
+
+    private func showToday() {
+        let today = calendar.startOfDay(for: Date())
+        displayedMonth = today
+        selectedDate = today
+    }
+
+    private func requestReflection(for sessionID: UUID) {
+        pendingReflectionTarget = ReflectionTarget(id: sessionID)
+        isDayDetailPresented = false
+    }
+
+    private func presentPendingReflection() {
+        guard let target = pendingReflectionTarget else { return }
+        pendingReflectionTarget = nil
+        reflectionTarget = target
     }
 
     @MainActor

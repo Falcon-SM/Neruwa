@@ -1,6 +1,6 @@
 import SwiftUI
 
-private enum SleepEntryMode: String, CaseIterable {
+enum SleepEntryMode: String, CaseIterable, Hashable {
     case timer
     case manual
 
@@ -27,7 +27,7 @@ struct SleepRecorderView: View {
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("sleepTargetMinutes") private var targetMinutes = 480
 
-    @State private var entryMode: SleepEntryMode = .timer
+    @State private var entryMode: SleepEntryMode
     @State private var manualDay = Calendar.current.date(
         byAdding: .day,
         value: -1,
@@ -48,6 +48,7 @@ struct SleepRecorderView: View {
     @State private var reflectionTarget: ReflectionTarget?
     @State private var timerNow = Date()
     @State private var isScreenVisible = false
+    @State private var isUsingManualTimerFallback = false
 
     private let minimumTarget = 6 * 60
     private let maximumTarget = 10 * 60
@@ -56,13 +57,37 @@ struct SleepRecorderView: View {
     private let onSleepStarted: (() -> Void)?
     private let onSleepSessionSaved: ((UUID) -> Void)?
     private let automaticallyPresentsReflection: Bool
+    private let allowedEntryModes: [SleepEntryMode]
+    private let showsHealthImport: Bool
+    private let allowsManualFallbackAfterInvalidTimer: Bool
 
     init(
+        allowedEntryModes: [SleepEntryMode] = SleepEntryMode.allCases,
+        initialEntryMode: SleepEntryMode = .timer,
+        showsHealthImport: Bool = true,
+        allowsManualFallbackAfterInvalidTimer: Bool = false,
         onReflectionSaved: ((UUID) -> Void)? = nil,
         onSleepStarted: (() -> Void)? = nil,
         onSleepSessionSaved: ((UUID) -> Void)? = nil,
         automaticallyPresentsReflection: Bool = true
     ) {
+        let normalizedModes = allowedEntryModes.reduce(into: [SleepEntryMode]()) {
+            if !$0.contains($1) {
+                $0.append($1)
+            }
+        }
+        let availableModes = normalizedModes.isEmpty
+            ? SleepEntryMode.allCases
+            : normalizedModes
+
+        self.allowedEntryModes = availableModes
+        self.showsHealthImport = showsHealthImport
+        self.allowsManualFallbackAfterInvalidTimer = allowsManualFallbackAfterInvalidTimer
+        _entryMode = State(
+            initialValue: availableModes.contains(initialEntryMode)
+                ? initialEntryMode
+                : availableModes[0]
+        )
         self.onReflectionSaved = onReflectionSaved
         self.onSleepStarted = onSleepStarted
         self.onSleepSessionSaved = onSleepSessionSaved
@@ -72,21 +97,32 @@ struct SleepRecorderView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 24) {
+                LazyVStack(alignment: .leading, spacing: 16) {
                     Text("睡眠時間を記録して、朝の調子と一緒に振り返ります。")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
                     statusMessages
 
-                    Picker("記録方法", selection: $entryMode) {
-                        ForEach(SleepEntryMode.allCases, id: \.self) { mode in
-                            Text(mode.title).tag(mode)
+                    if allowedEntryModes.count > 1 {
+                        Picker("記録方法", selection: $entryMode) {
+                            ForEach(allowedEntryModes, id: \.self) { mode in
+                                Text(mode.title).tag(mode)
+                            }
                         }
+                        .pickerStyle(.segmented)
                     }
-                    .pickerStyle(.segmented)
 
-                    if entryMode == .timer {
+                    if isUsingManualTimerFallback {
+                        Label(
+                            "計測を自動保存できなかったため、就寝・起床時刻を確認してください。",
+                            systemImage: "exclamationmark.triangle.fill"
+                        )
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+
+                        manualContent
+                    } else if entryMode == .timer {
                         timerContent
                     } else {
                         manualContent
@@ -96,22 +132,24 @@ struct SleepRecorderView: View {
 
                     targetControl
 
-                    Button(action: importFromHealthKit) {
-                        HStack {
-                            Spacer()
-                            if sleepStore.isSyncing {
-                                ProgressView()
-                            } else {
-                                Image(systemName: "heart.text.square")
+                    if showsHealthImport {
+                        Button(action: importFromHealthKit) {
+                            HStack {
+                                Spacer()
+                                if sleepStore.isSyncing {
+                                    ProgressView()
+                                } else {
+                                    Image(systemName: "heart.text.square")
+                                }
+                                Text(sleepStore.isSyncing ? "ヘルスケアを確認中…" : "ヘルスケアから読み込む")
+                                Spacer()
                             }
-                            Text(sleepStore.isSyncing ? "ヘルスケアを確認中…" : "ヘルスケアから読み込む")
-                            Spacer()
                         }
+                        .buttonStyle(.bordered)
+                        .controlSize(.large)
+                        .disabled(sleepStore.isSyncing || sleepStore.activeTimerStartedAt != nil)
+                        .accessibilityHint("Appleヘルスケアに保存された昨夜の睡眠を取り込みます")
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .disabled(sleepStore.isSyncing || sleepStore.activeTimerStartedAt != nil)
-                    .accessibilityHint("Appleヘルスケアに保存された昨夜の睡眠を取り込みます")
                 }
                 .padding(.vertical, 16)
             }
@@ -119,7 +157,7 @@ struct SleepRecorderView: View {
             .scrollDismissesKeyboard(.interactively)
             .scrollBounceBehavior(.basedOnSize)
             .ambientScreenBackground()
-            .navigationTitle("睡眠")
+            .navigationTitle("睡眠記録")
             .navigationBarTitleDisplayMode(.large)
         }
         .onAppear {
@@ -139,14 +177,12 @@ struct SleepRecorderView: View {
         .task(id: timerRefreshKey) {
             await refreshRunningTimer(for: timerRefreshKey)
         }
-        .sheet(item: $reflectionTarget) { target in
+        .fullScreenCover(item: $reflectionTarget) { target in
             MorningReflectionView(
                 sessionID: target.id,
                 onSaved: onReflectionSaved
             )
                 .environmentObject(sleepStore)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
         }
     }
 
@@ -166,7 +202,7 @@ struct SleepRecorderView: View {
     private var timerContent: some View {
         let elapsed = elapsedTime(at: timerNow)
 
-        return VStack(spacing: 18) {
+        return VStack(spacing: 12) {
             HStack {
                 Label(
                     sleepStore.activeTimerStartedAt == nil ? "待機中" : "計測中",
@@ -187,7 +223,7 @@ struct SleepRecorderView: View {
             }
 
             SleepDurationClockDial(elapsed: elapsed)
-                .frame(maxWidth: 300)
+                .frame(maxWidth: 220)
                 .aspectRatio(1, contentMode: .fit)
                 .frame(maxWidth: .infinity)
 
@@ -225,7 +261,7 @@ struct SleepRecorderView: View {
         let dates = resolvedManualDates
         let duration = manualDurationMinutes
 
-        return VStack(alignment: .leading, spacing: 16) {
+        return VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text("睡眠時間")
                     .font(.subheadline)
@@ -359,12 +395,20 @@ struct SleepRecorderView: View {
                 onSleepStarted?()
             }
         } else {
+            let hadActiveTimer = sleepStore.activeTimerStartedAt != nil
             let session = sleepStore.stopTimer(targetMinutes: targetMinutes)
             if learningStore.settings.autoStartWithSleepTimer {
                 learningStore.stopSleepPlayback()
             }
             if let session {
                 handleSavedSession(session)
+            } else if hadActiveTimer,
+                      sleepStore.activeTimerStartedAt == nil,
+                      allowsManualFallbackAfterInvalidTimer {
+                withAnimation(.snappy) {
+                    entryMode = .manual
+                    isUsingManualTimerFallback = true
+                }
             }
         }
     }

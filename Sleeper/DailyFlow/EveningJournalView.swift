@@ -63,6 +63,7 @@ struct EveningJournalView: View {
                 navigationSection
             }
             .scrollDismissesKeyboard(.interactively)
+            .scrollBounceBehavior(.basedOnSize)
             .navigationTitle("今日を閉じる")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -139,7 +140,7 @@ struct EveningJournalView: View {
                     axis: .vertical
                 )
                 .focused($focusedField, equals: .today)
-                .lineLimit(8...14)
+                .lineLimit(4...6)
                 .accessibilityLabel("今日あったこと")
             } header: {
                 Label("今日あったこと", systemImage: "square.and.pencil")
@@ -158,7 +159,7 @@ struct EveningJournalView: View {
                     axis: .vertical
                 )
                 .focused($focusedField, equals: .letGo)
-                .lineLimit(8...14)
+                .lineLimit(4...6)
                 .accessibilityLabel("明日に回してよいこと")
             } header: {
                 Label("明日に回してよいこと", systemImage: "wind")
@@ -184,7 +185,7 @@ struct EveningJournalView: View {
                             axis: .vertical
                         )
                         .focused($focusedField, equals: .tomorrow(index))
-                        .lineLimit(2...4)
+                        .lineLimit(1...2)
                     }
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel("明日の\(index + 1)つ目")
@@ -219,25 +220,30 @@ struct EveningJournalView: View {
         Button {
             moveBackward()
         } label: {
-            Label("前へ", systemImage: "chevron.left")
-                .frame(maxWidth: .infinity)
+            Text("前へ")
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, minHeight: 24, alignment: .center)
         }
         .buttonStyle(.bordered)
+        .controlSize(.large)
+        .frame(maxWidth: .infinity)
         .disabled(step == .today)
+        .accessibilityLabel("前の日記項目へ")
     }
 
     private var forwardButton: some View {
         Button {
             moveForward()
         } label: {
-            Label(
-                step == .tomorrow ? "保存して次へ" : "次へ",
-                systemImage: step == .tomorrow ? "checkmark" : "chevron.right"
-            )
-            .frame(maxWidth: .infinity)
+            Text(step == .tomorrow ? "保存して次へ" : "次へ")
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, minHeight: 24, alignment: .center)
         }
         .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        .frame(maxWidth: .infinity)
         .disabled(didComplete)
+        .accessibilityLabel(step == .tomorrow ? "日記を保存して次へ" : "次の日記項目へ")
     }
 
     private func characterCount(_ text: String, maximum: Int) -> some View {

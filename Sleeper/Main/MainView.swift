@@ -6,7 +6,6 @@
 import SwiftUI
 
 enum MainTab: Hashable {
-    case home
     case sleep
     case learning
     case history
@@ -14,10 +13,6 @@ enum MainTab: Hashable {
 }
 
 struct MainView: View {
-    private struct ReflectionTarget: Identifiable {
-        let id: UUID
-    }
-
     private struct FlowClockTaskID: Hashable {
         let isActive: Bool
         let morningStartMinutes: Int
@@ -32,42 +27,22 @@ struct MainView: View {
     private var morningStartMinutes = DailyFlowSchedule.defaultMorningStartMinutes
     @AppStorage(DailyFlowSchedule.nightStartDefaultsKey)
     private var nightStartMinutes = DailyFlowSchedule.defaultNightStartMinutes
-    @State private var selectedTab: MainTab = .home
+    @State private var selectedTab: MainTab = .history
     @State private var flowNow = Date()
     @State private var isSettingsPresented = false
-    @State private var isEveningJournalPresented = false
-    @State private var reflectionTarget: ReflectionTarget?
-    @State private var shouldRouteHomeOnActivation = false
+
+    init(user: Binding<AppUser?>) {
+        _user = user
+    }
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            Tab("Home", systemImage: "house.fill", value: .home) {
-                if let userBinding = Binding($user) {
-                    HomeView(
-                        user: userBinding,
-                        selectedTab: $selectedTab,
-                        now: flowNow,
-                        onStartEveningFlow: {
-                            isEveningJournalPresented = true
-                        },
-                        onResumeReflection: { sessionID in
-                            reflectionTarget = ReflectionTarget(id: sessionID)
-                        },
-                        onOpenLearning: {
-                            selectedTab = .learning
-                        },
-                        onOpenSettings: {
-                            isSettingsPresented = true
-                        }
-                    )
-                    .environment(\.isAmbientBackgroundActive, selectedTab == .home)
-                } else {
-                    MissingUserView()
-                }
-            }
-
-            Tab("夜", systemImage: "moon.stars.fill", value: .sleep) {
-                SleepRecorderView()
+            Tab("睡眠記録", systemImage: "bed.double.fill", value: .sleep) {
+                SleepRecorderView(
+                    allowedEntryModes: [.manual],
+                    initialEntryMode: .manual,
+                    showsHealthImport: false
+                )
                     .environment(\.isAmbientBackgroundActive, selectedTab == .sleep)
             }
 
@@ -119,30 +94,11 @@ struct MainView: View {
                 .environmentObject(eveningStore)
             }
         }
-        .sheet(isPresented: $isEveningJournalPresented) {
-            EveningJournalView(day: nightFlowDay) {
-                selectedTab = .learning
-            }
-            .environmentObject(eveningStore)
-        }
-        .sheet(item: $reflectionTarget) { target in
-            MorningReflectionView(sessionID: target.id)
-            .environmentObject(sleepStore)
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
-        }
     }
 
     private var ambientScene: AmbientScene {
         AmbientScene.timeFallback(
             at: flowNow,
-            schedule: dailyFlowSchedule
-        )
-    }
-
-    private var nightFlowDay: Date {
-        DailyFlowPeriod.nightFlowDay(
-            containing: flowNow,
             schedule: dailyFlowSchedule
         )
     }
@@ -163,15 +119,8 @@ struct MainView: View {
     }
 
     private func handleScenePhaseChange(_ newPhase: ScenePhase) {
-        switch newPhase {
-        case .background:
-            shouldRouteHomeOnActivation = true
-        case .active where shouldRouteHomeOnActivation:
+        if newPhase == .active {
             flowNow = Date()
-            selectedTab = .home
-            shouldRouteHomeOnActivation = false
-        default:
-            break
         }
     }
 

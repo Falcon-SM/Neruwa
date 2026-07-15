@@ -14,7 +14,6 @@ struct MorningReflectionView: View {
     @State private var note = ""
     @State private var didLoad = false
 
-    private let moods: [SleepMood] = [.bad, .flat, .good, .great]
     private let noteLimit = 240
 
     init(
@@ -55,10 +54,29 @@ struct MorningReflectionView: View {
             }
             .listStyle(.insetGrouped)
             .scrollDismissesKeyboard(.interactively)
+            .scrollBounceBehavior(.basedOnSize)
             .scrollContentBackground(.hidden)
             .ambientScreenBackground()
             .navigationTitle("今日の気分")
             .navigationBarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if !allowsDismissal,
+                   sleepStore.session(id: sessionID) != nil {
+                    VStack {
+                        Button(action: saveReflection) {
+                            Text("次へ")
+                                .frame(maxWidth: .infinity, alignment: .center)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .disabled(selectedMood == nil)
+                        .accessibilityHint("気分を保存して朝の点字テストへ進みます")
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(.bar)
+                }
+            }
             .toolbar {
                 if allowsDismissal {
                     ToolbarItem(placement: .cancellationAction) {
@@ -68,9 +86,9 @@ struct MorningReflectionView: View {
                     }
                 }
 
-                ToolbarItem(placement: .confirmationAction) {
-                    if sleepStore.session(id: sessionID) != nil {
-                        Button(allowsDismissal ? "保存" : "次へ", action: saveReflection)
+                if allowsDismissal {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("保存", action: saveReflection)
                             .fontWeight(.semibold)
                             .disabled(selectedMood == nil)
                     }
@@ -94,12 +112,12 @@ struct MorningReflectionView: View {
 
     private func sessionSection(_ session: SleepSession) -> some View {
         Section {
-            VStack(spacing: 14) {
+            VStack(spacing: 10) {
                 SleepDurationClockDial(
                     elapsed: TimeInterval(session.durationMinutes * 60),
                     displaysSecondHand: false
                 )
-                .frame(width: 190, height: 190)
+                .frame(width: 150, height: 150)
 
                 VStack(spacing: 3) {
                     Text(SleepDurationFormatter.summary(minutes: session.durationMinutes))
@@ -111,7 +129,7 @@ struct MorningReflectionView: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
+            .padding(.vertical, 4)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(
                 "昨夜の睡眠時間、\(SleepDurationFormatter.summary(minutes: session.durationMinutes))"
@@ -144,16 +162,7 @@ struct MorningReflectionView: View {
 
     private var moodSection: some View {
         Section {
-            Picker("今朝の気分", selection: $selectedMood) {
-                Text("選択してください")
-                    .tag(SleepMood?.none)
-
-                ForEach(moods) { mood in
-                    Text("\(mood.emoji)  \(mood.label)")
-                        .tag(Optional(mood))
-                }
-            }
-            .pickerStyle(.navigationLink)
+            MorningMoodPicker(selection: $selectedMood)
         } header: {
             Text("今朝の気分")
         } footer: {
@@ -165,7 +174,7 @@ struct MorningReflectionView: View {
         Section {
             TextField("夢、体の軽さ、目覚めたときのことなど", text: $note, axis: .vertical)
                 .focused($noteIsFocused)
-                .lineLimit(4...8)
+                .lineLimit(3...5)
                 .accessibilityLabel("ひとこと")
         } header: {
             Text("ひとこと")
@@ -204,5 +213,41 @@ struct MorningReflectionView: View {
         if dismissesOnSave {
             dismiss()
         }
+    }
+}
+
+/// A compact, in-place mood control shared by the regular reflection screen and
+/// the mandatory morning flow. Keeping the choices on one row avoids a second
+/// navigation step while retaining the native segmented-control interaction.
+struct MorningMoodPicker: View {
+    @Binding var selection: SleepMood?
+
+    private let moods: [SleepMood] = [.bad, .flat, .good, .great]
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Picker("今朝の気分", selection: $selection) {
+                ForEach(moods) { mood in
+                    Text(mood.emoji)
+                        .tag(Optional(mood))
+                        .accessibilityLabel(mood.label)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.large)
+
+            HStack(spacing: 0) {
+                ForEach(moods) { mood in
+                    Text(mood.label)
+                        .font(.caption2)
+                        .fontWeight(selection == mood ? .semibold : .regular)
+                        .foregroundStyle(selection == mood ? .primary : .secondary)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .accessibilityHidden(true)
+        }
+        .sensoryFeedback(.selection, trigger: selection)
     }
 }

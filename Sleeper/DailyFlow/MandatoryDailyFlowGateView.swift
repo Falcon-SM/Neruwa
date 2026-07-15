@@ -5,13 +5,11 @@ struct MandatoryDailyFlowGateView: View {
     @EnvironmentObject private var learningStore: SleepLearningStore
     @EnvironmentObject private var eveningStore: EveningStore
     @EnvironmentObject private var flowStore: MandatoryDailyFlowStore
-    @AppStorage("sleepTargetMinutes") private var targetMinutes = 480
 
     let context: MandatoryDailyFlowContext
-    let onCompleted: () -> Void
+    let onCompleted: (MandatoryDailyFlowContext?) -> Void
 
     @State private var currentStep: MandatoryDailyFlowStep?
-    @State private var learningPhase: SleepLearningPhase = .study
     @State private var didInitialize = false
     @State private var isCompleting = false
 
@@ -21,6 +19,7 @@ struct MandatoryDailyFlowGateView: View {
         Group {
             if let currentStep {
                 stepContent(currentStep)
+                    .id(currentStep.rawValue)
                     .safeAreaInset(edge: .top, spacing: 0) {
                         MandatoryFlowProgressBanner(
                             period: context.period,
@@ -43,14 +42,6 @@ struct MandatoryDailyFlowGateView: View {
         .interactiveDismissDisabled()
         .task(id: context.id) {
             initializeFlowIfNeeded()
-        }
-        .onChange(of: learningPhase) { _, newPhase in
-            guard context.period == .night,
-                  newPhase == .audio,
-                  currentStep == .nightStudy else {
-                return
-            }
-            advance(to: .nightAudio)
         }
     }
 
@@ -120,31 +111,45 @@ struct MandatoryDailyFlowGateView: View {
             }
             .environmentObject(eveningStore)
 
-        case .nightStudy, .nightAudio:
+        case .nightStudy:
             SleepLearningView(
-                phase: $learningPhase,
+                phase: .constant(.study),
                 showsPhaseSelector: false,
-                showsStudyContinuation: true,
-                allowsTestSkipping: false,
-                onContinueToSleep: {
-                    advance(to: .nightSleep)
-                }
+                showsStudyContinuation: false,
+                allowsTestSkipping: false
             )
             .environmentObject(learningStore)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                mandatoryNightAdvanceButton("音声設定へ") {
+                    advance(to: .nightAudio)
+                }
+            }
+
+        case .nightAudio:
+            SleepLearningView(
+                phase: .constant(.audio),
+                showsPhaseSelector: false,
+                showsStudyContinuation: false,
+                allowsTestSkipping: false
+            )
+            .environmentObject(learningStore)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                mandatoryNightAdvanceButton("睡眠記録へ") {
+                    advance(to: .nightSleep)
+                }
+            }
 
         case .nightSleep:
             SleepRecorderView(
-                onSleepStarted: completeFlow,
-                onSleepSessionSaved: { _ in completeFlow() },
+                allowedEntryModes: [.timer],
+                initialEntryMode: .timer,
+                showsHealthImport: false,
+                allowsManualFallbackAfterInvalidTimer: true,
+                onSleepSessionSaved: completeNightFlow,
                 automaticallyPresentsReflection: false
             )
             .environmentObject(sleepStore)
             .environmentObject(learningStore)
-            .onAppear {
-                if hasActiveTimerForCurrentNight {
-                    completeFlow()
-                }
-            }
 
         case .completed:
             ProgressView("完了しました")
@@ -152,6 +157,23 @@ struct MandatoryDailyFlowGateView: View {
                 .ambientScreenBackground()
                 .onAppear(perform: completeFlow)
         }
+    }
+
+    private func mandatoryNightAdvanceButton(
+        _ title: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        VStack {
+            Button(action: action) {
+                Text(title)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(.bar)
     }
 
     private var flowProgress: MandatoryDailyFlowProgress? {
@@ -185,8 +207,6 @@ struct MandatoryDailyFlowGateView: View {
         guard !didInitialize else { return }
         didInitialize = true
 
-        finalizeActiveTimerForMorningIfNeeded()
-
         let existing = flowStore.progress(for: context)
         let initial = existing ?? flowStore.ensureProgress(
             for: context,
@@ -200,23 +220,7 @@ struct MandatoryDailyFlowGateView: View {
         }
 
         currentStep = initial.step
-        learningPhase = initial.step == .nightAudio ? .audio : .study
         reconcilePersistedData()
-    }
-
-    /// Opening the app in the morning means the user has woken up. Finalize a
-    /// timer that was started by the preceding night flow before collecting
-    /// mood and test results, so every morning result has a SleepSession.
-    private func finalizeActiveTimerForMorningIfNeeded() {
-        guard context.period == .morning,
-              sleepStore.activeTimerStartedAt != nil else {
-            return
-        }
-
-        _ = sleepStore.stopTimer(
-            targetMinutes: min(max(targetMinutes, 6 * 60), 10 * 60)
-        )
-        learningStore.stopSleepPlayback()
     }
 
     private var preferredInitialStep: MandatoryDailyFlowStep {
@@ -231,6 +235,9 @@ struct MandatoryDailyFlowGateView: View {
             return .morningTest
 
         case .night:
+            if hasActiveTimerForCurrentNight {
+                return .nightSleep
+            }
             let journalComplete = eveningStore
                 .entry(for: context.targetDay, calendar: calendar)?
                 .completedAt != nil
@@ -260,11 +267,6 @@ struct MandatoryDailyFlowGateView: View {
                 calendar: calendar
             )?.completedAt != nil {
                 advance(to: .nightStudy)
-            }
-
-        case .nightSleep:
-            if hasActiveTimerForCurrentNight {
-                completeFlow()
             }
 
         case .completed:
@@ -314,11 +316,6 @@ struct MandatoryDailyFlowGateView: View {
             to: step,
             targetSleepSessionID: targetSleepSessionID
         )
-        if step == .nightAudio {
-            learningPhase = .audio
-        } else if step == .nightStudy {
-            learningPhase = .study
-        }
         withAnimation(.snappy) {
             currentStep = step
         }
@@ -328,7 +325,37 @@ struct MandatoryDailyFlowGateView: View {
         guard !isCompleting else { return }
         isCompleting = true
         flowStore.complete(context)
-        onCompleted()
+        onCompleted(nil)
+    }
+
+    private func completeNightFlow(_ sessionID: UUID) {
+        guard !isCompleting,
+              context.period == .night,
+              let session = sleepStore.session(id: sessionID) else {
+            return
+        }
+
+        isCompleting = true
+        learningStore.stopSleepPlayback()
+        flowStore.complete(context)
+
+        let morningDay = DailyFlowPeriod.morningFlowDay(
+            containing: session.endDate,
+            calendar: calendar,
+            schedule: context.schedule
+        )
+        let morningContext = MandatoryDailyFlowContext(
+            profileID: context.profileID,
+            period: .morning,
+            targetDay: morningDay,
+            calendar: calendar,
+            schedule: context.schedule
+        )
+        flowStore.beginMorningHandoff(
+            morningContext,
+            targetSleepSessionID: session.id
+        )
+        onCompleted(morningContext)
     }
 }
 
@@ -395,23 +422,19 @@ private struct MandatoryMorningMoodView: View {
         NavigationStack {
             List {
                 Section {
-                    ContentUnavailableView {
-                        Label("睡眠記録はあとで追加", systemImage: "clock.badge.questionmark")
-                    } description: {
-                        Text("まずは今の気分を保存します。睡眠記録が追加されたら自動で結び付けます。")
-                    }
+                    Label(
+                        "睡眠記録はあとで追加できます",
+                        systemImage: "clock.badge.questionmark"
+                    )
+                    .font(.subheadline.weight(.semibold))
+
+                    Text("今の気分を先に保存し、追加された睡眠記録へ自動で結び付けます。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("今朝の気分") {
-                    Picker("今朝の気分", selection: $selectedMood) {
-                        Text("選択してください")
-                            .tag(SleepMood?.none)
-                        ForEach(SleepMood.allCases) { mood in
-                            Text("\(mood.emoji)  \(mood.label)")
-                                .tag(Optional(mood))
-                        }
-                    }
-                    .pickerStyle(.navigationLink)
+                    MorningMoodPicker(selection: $selectedMood)
                 }
 
                 Section {
@@ -421,7 +444,7 @@ private struct MandatoryMorningMoodView: View {
                         axis: .vertical
                     )
                     .focused($noteIsFocused)
-                    .lineLimit(4...8)
+                    .lineLimit(2...4)
                 } header: {
                     Text("ひとこと")
                 } footer: {
@@ -436,17 +459,27 @@ private struct MandatoryMorningMoodView: View {
             }
             .listStyle(.insetGrouped)
             .scrollDismissesKeyboard(.interactively)
+            .scrollBounceBehavior(.basedOnSize)
             .scrollContentBackground(.hidden)
             .ambientScreenBackground()
             .navigationTitle("今日の気分")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("次へ", action: saveMood)
-                        .fontWeight(.semibold)
-                        .disabled(selectedMood == nil)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack {
+                    Button(action: saveMood) {
+                        Text("次へ")
+                            .frame(maxWidth: .infinity, alignment: .center)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(selectedMood == nil)
+                    .accessibilityHint("気分を保存して朝の点字テストへ進みます")
                 }
-
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(.bar)
+            }
+            .toolbar {
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
                     Button("完了") {

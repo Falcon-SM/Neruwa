@@ -45,6 +45,9 @@ struct MandatoryDailyFlowProgress: Codable, Equatable, Sendable {
     var pendingNote: String
     var morningTestCompletedAt: Date?
     var morningTestResultID: UUID?
+    /// `true` only when waking from the mandatory night timer created this
+    /// morning flow. Optional keeps existing persisted v2 records decodable.
+    var isNightTimerHandoff: Bool?
     var updatedAt: Date
     var completedAt: Date?
 
@@ -55,6 +58,7 @@ struct MandatoryDailyFlowProgress: Codable, Equatable, Sendable {
         pendingNote: String = "",
         morningTestCompletedAt: Date? = nil,
         morningTestResultID: UUID? = nil,
+        isNightTimerHandoff: Bool = false,
         updatedAt: Date = Date(),
         completedAt: Date? = nil
     ) {
@@ -64,6 +68,7 @@ struct MandatoryDailyFlowProgress: Codable, Equatable, Sendable {
         self.pendingNote = pendingNote
         self.morningTestCompletedAt = morningTestCompletedAt
         self.morningTestResultID = morningTestResultID
+        self.isNightTimerHandoff = isNightTimerHandoff
         self.updatedAt = updatedAt
         self.completedAt = completedAt
     }
@@ -142,7 +147,10 @@ final class MandatoryDailyFlowStore: ObservableObject {
     @Published private(set) var progressByFlowID: [String: MandatoryDailyFlowProgress]
     @Published private(set) var errorMessage: String?
 
-    private static let profileKeyPrefix = "Sleeper.MandatoryDailyFlowStore.profile.v1"
+    // v2 intentionally starts with a clean daily-flow ledger. The previous
+    // behavior marked a night flow complete as soon as its timer started,
+    // which can otherwise suppress the corrected wake-up flow indefinitely.
+    private static let profileKeyPrefix = "Sleeper.MandatoryDailyFlowStore.profile.v2"
     private static let guestProfileID = "local-demo-user"
     private static let maximumStoredFlows = 180
 
@@ -257,8 +265,94 @@ final class MandatoryDailyFlowStore: ObservableObject {
         persist()
     }
 
+    /// Returns the latest morning flow created by a completed night timer.
+    /// The handoff must survive later time boundaries so reopening the app can
+    /// never route past an unfinished mood/test/record sequence.
+    func latestIncompleteMorningHandoff(
+        profileID requestedProfileID: String,
+        schedule: DailyFlowSchedule,
+        calendar: Calendar = .current
+    ) -> MandatoryDailyFlowContext? {
+        guard Self.normalizedProfileID(requestedProfileID) == profileID else {
+            return nil
+        }
+
+        var latest: (flowID: String, targetDay: Date, updatedAt: Date)?
+        for (flowID, progress) in progressByFlowID {
+            guard flowID.hasPrefix("morning."),
+                  progress.step != .completed,
+                  progress.isNightTimerHandoff == true,
+                  let targetDay = Self.targetDay(fromMorningFlowID: flowID, calendar: calendar) else {
+                continue
+            }
+
+            if let latest, progress.updatedAt <= latest.updatedAt { continue }
+            latest = (flowID, targetDay, progress.updatedAt)
+        }
+
+        guard let latest else { return nil }
+        if supersedeIncompleteMorningHandoffs(except: latest.flowID) {
+            persist()
+        }
+        return MandatoryDailyFlowContext(
+            profileID: requestedProfileID,
+            period: .morning,
+            targetDay: latest.targetDay,
+            calendar: calendar,
+            schedule: schedule
+        )
+    }
+
+    /// Starts the morning flow for the exact session that was just saved by
+    /// the preceding night flow. A fresh progress value prevents an earlier
+    /// completion or test result for the same flow day from skipping steps.
+    func beginMorningHandoff(
+        _ context: MandatoryDailyFlowContext,
+        targetSleepSessionID: UUID
+    ) {
+        guard context.period == .morning,
+              Self.normalizedProfileID(context.profileID) == profileID else {
+            return
+        }
+
+        _ = supersedeIncompleteMorningHandoffs(except: context.flowID)
+        progressByFlowID[context.flowID] = MandatoryDailyFlowProgress(
+            step: .morningMood,
+            targetSleepSessionID: targetSleepSessionID,
+            isNightTimerHandoff: true
+        )
+        persist()
+    }
+
     func complete(_ context: MandatoryDailyFlowContext) {
         advance(context, to: .completed)
+    }
+
+    /// Only the most recently saved sleep should own an unfinished morning
+    /// handoff. Older leftovers are completed so they cannot reappear after
+    /// the current flow finishes.
+    private func supersedeIncompleteMorningHandoffs(
+        except retainedFlowID: String,
+        at completedAt: Date = Date()
+    ) -> Bool {
+        let supersededFlowIDs = progressByFlowID.keys.filter { flowID in
+            guard flowID != retainedFlowID,
+                  flowID.hasPrefix("morning."),
+                  let progress = progressByFlowID[flowID] else {
+                return false
+            }
+            return progress.step != .completed
+                && progress.isNightTimerHandoff == true
+        }
+
+        for flowID in supersededFlowIDs {
+            guard var progress = progressByFlowID[flowID] else { continue }
+            progress.step = .completed
+            progress.updatedAt = completedAt
+            progress.completedAt = completedAt
+            progressByFlowID[flowID] = progress
+        }
+        return !supersededFlowIDs.isEmpty
     }
 }
 
@@ -268,7 +362,7 @@ fileprivate extension MandatoryDailyFlowStore {
         var progressByFlowID: [String: MandatoryDailyFlowProgress]
 
         init(
-            schemaVersion: Int = 1,
+            schemaVersion: Int = 2,
             progressByFlowID: [String: MandatoryDailyFlowProgress]
         ) {
             self.schemaVersion = schemaVersion
@@ -375,5 +469,29 @@ fileprivate extension MandatoryDailyFlowStore {
             periodKey = "night"
         }
         return "\(periodKey).\(dateKey)"
+    }
+
+    nonisolated static func targetDay(
+        fromMorningFlowID flowID: String,
+        calendar: Calendar
+    ) -> Date? {
+        let prefix = "morning."
+        guard flowID.hasPrefix(prefix) else { return nil }
+
+        let components = flowID.dropFirst(prefix.count).split(separator: "-")
+        guard components.count == 3,
+              let year = Int(components[0]),
+              let month = Int(components[1]),
+              let day = Int(components[2]) else {
+            return nil
+        }
+
+        var dateComponents = DateComponents()
+        dateComponents.calendar = calendar
+        dateComponents.timeZone = calendar.timeZone
+        dateComponents.year = year
+        dateComponents.month = month
+        dateComponents.day = day
+        return calendar.date(from: dateComponents).map(calendar.startOfDay(for:))
     }
 }

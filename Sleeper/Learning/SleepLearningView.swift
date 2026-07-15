@@ -98,6 +98,7 @@ struct SleepLearningView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .scrollBounceBehavior(.basedOnSize)
             .scrollContentBackground(.hidden)
             .ambientScreenBackground()
             .navigationTitle(navigationTitle)
@@ -199,7 +200,7 @@ struct SleepLearningView: View {
                         isStudyAnswerVisible.toggle()
                     }
                 } label: {
-                    VStack(spacing: 16) {
+                    VStack(spacing: 12) {
                         HStack {
                             Text("\(studyIndex + 1) / \(learningStore.cards.count)")
                                 .font(.caption.weight(.semibold).monospacedDigit())
@@ -219,7 +220,7 @@ struct SleepLearningView: View {
                             Label("答えを見る", systemImage: "hand.tap.fill")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.secondary)
-                                .frame(minHeight: 72)
+                                .frame(minHeight: 52)
                         }
                     }
                     .frame(maxWidth: .infinity)
@@ -257,10 +258,11 @@ struct SleepLearningView: View {
             Button {
                 isPresentingAddCard = true
             } label: {
-                Label("自分のカードを追加", systemImage: "plus")
-                    .frame(maxWidth: .infinity)
+                centeredActionLabel("自分のカードを追加", systemImage: "plus")
             }
             .buttonStyle(.bordered)
+            .controlSize(.large)
+            .frame(maxWidth: .infinity)
 
             if showsStudyContinuation {
                 Button {
@@ -268,37 +270,45 @@ struct SleepLearningView: View {
                         phase = .audio
                     }
                 } label: {
-                    Label("次は睡眠音声", systemImage: "speaker.wave.2.fill")
-                        .frame(maxWidth: .infinity)
+                    centeredActionLabel("次は睡眠音声", systemImage: "speaker.wave.2.fill")
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
+                .frame(maxWidth: .infinity)
             }
         }
     }
 
     private var previousStudyButton: some View {
         Button(action: previousStudyCard) {
-            Label("前へ", systemImage: "chevron.left")
-                .frame(maxWidth: .infinity)
+            Text("前へ")
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, minHeight: 24, alignment: .center)
         }
         .buttonStyle(.bordered)
+        .controlSize(.large)
+        .frame(maxWidth: .infinity)
         .disabled(studyIndex == 0 || learningStore.cards.isEmpty)
+        .accessibilityLabel("前の学習カードへ")
     }
 
     private var nextStudyButton: some View {
         Button(action: nextStudyCard) {
-            Label("次へ", systemImage: "chevron.right")
-                .frame(maxWidth: .infinity)
+            Text("次へ")
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, minHeight: 24, alignment: .center)
         }
         .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        .frame(maxWidth: .infinity)
         .disabled(studyIndex >= learningStore.cards.count - 1)
+        .accessibilityLabel("次の学習カードへ")
     }
 
     @ViewBuilder
     private func studyPrompt(_ card: LearningCard) -> some View {
         if let cells = card.brailleCells, !cells.isEmpty {
-            VStack(spacing: 13) {
+            VStack(spacing: 10) {
                 Text("この点字は？")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -310,7 +320,7 @@ struct SleepLearningView: View {
                 .font(.system(.title2, design: .rounded, weight: .bold))
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(minHeight: 116)
+                .frame(minHeight: 84)
                 .accessibilityLabel("問題、\(card.prompt)")
         }
     }
@@ -326,7 +336,7 @@ struct SleepLearningView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            .frame(minHeight: 72)
+            .frame(minHeight: 52)
             .accessibilityElement(children: .combine)
             .accessibilityLabel("答え、\(card.prompt)、\(card.answer)")
         } else {
@@ -341,7 +351,7 @@ struct SleepLearningView: View {
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
-            .frame(minHeight: 72)
+            .frame(minHeight: 52)
             .accessibilityElement(children: .combine)
             .accessibilityLabel("答え、\(card.answer)")
         }
@@ -368,13 +378,14 @@ struct SleepLearningView: View {
             }
 
             Button(action: togglePlayback) {
-                Label(
+                centeredActionLabel(
                     learningStore.isPlaying ? "睡眠音声を停止" : "睡眠音声を開始",
                     systemImage: learningStore.isPlaying ? "stop.fill" : "play.fill"
                 )
-                .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .frame(maxWidth: .infinity)
             .tint(learningStore.isPlaying ? Color.red : Color.accentColor)
             .disabled(!learningStore.isPlaying && learningStore.settings.selectedCardIDs.isEmpty)
             .accessibilityHint(
@@ -385,10 +396,11 @@ struct SleepLearningView: View {
 
             if let onContinueToSleep {
                 Button(action: onContinueToSleep) {
-                    Label("睡眠記録へ", systemImage: "moon.zzz.fill")
-                        .frame(maxWidth: .infinity)
+                    centeredActionLabel("睡眠記録へ", systemImage: "moon.zzz.fill")
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.large)
+                .frame(maxWidth: .infinity)
             }
         } header: {
             Text("睡眠中の音声")
@@ -460,8 +472,11 @@ struct SleepLearningView: View {
             Button {
                 isPresentingAddCard = true
             } label: {
-                Label("カードを追加", systemImage: "plus")
+                centeredActionLabel("カードを追加", systemImage: "plus")
             }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .frame(maxWidth: .infinity)
 
             if learningStore.cards.isEmpty {
                 emptyCardsRow
@@ -561,19 +576,19 @@ struct SleepLearningView: View {
                 }
 
                 Button(action: startQuiz) {
-                    Label("もう一度テスト", systemImage: "arrow.clockwise")
-                        .frame(maxWidth: .infinity)
+                    centeredActionLabel("もう一度テスト", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
+                .frame(maxWidth: .infinity)
 
                 if let onOpenHistory {
                     Button(action: onOpenHistory) {
-                        Label("記録を見る", systemImage: "chart.bar.xaxis")
-                            .frame(maxWidth: .infinity)
+                        centeredActionLabel("記録を見る", systemImage: "chart.bar.xaxis")
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.large)
+                    .frame(maxWidth: .infinity)
                 }
             }
         } else if let question = currentQuizQuestion {
@@ -595,7 +610,7 @@ struct SleepLearningView: View {
                         .font(.system(.title2, design: .rounded, weight: .bold))
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, minHeight: 90)
+                        .frame(maxWidth: .infinity, minHeight: 64)
                 }
             } header: {
                 HStack {
@@ -615,14 +630,14 @@ struct SleepLearningView: View {
             if selectedQuizOptionID != nil {
                 Section {
                     Button(action: advanceQuiz) {
-                        Label(
+                        centeredActionLabel(
                             quizIndex == quizQuestions.count - 1 ? "結果を見る" : "次の問題",
                             systemImage: "arrow.right.circle.fill"
                         )
-                        .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
+                    .frame(maxWidth: .infinity)
                 }
             }
         } else {
@@ -634,11 +649,11 @@ struct SleepLearningView: View {
                     .foregroundStyle(.secondary)
 
                 Button(action: startQuiz) {
-                    Label("テストを始める", systemImage: "play.fill")
-                        .frame(maxWidth: .infinity)
+                    centeredActionLabel("テストを始める", systemImage: "play.fill")
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
+                .frame(maxWidth: .infinity)
                 .disabled(quizDeck.count < 2)
 
                 if quizDeck.count < 2 {
@@ -652,13 +667,16 @@ struct SleepLearningView: View {
                     Button {
                         skipMorningTest(then: onOpenHistory)
                     } label: {
-                        Label(
+                        centeredActionLabel(
                             quizDeck.count < 2
                                 ? "カードが足りないため記録へ"
                                 : "テストをスキップして記録へ",
                             systemImage: "arrow.right"
                         )
                     }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity)
                 }
             } header: {
                 Text("朝の確認テスト")
@@ -705,6 +723,13 @@ struct SleepLearningView: View {
         } description: {
             Text("自分の言葉や覚えたい内容を追加できます。")
         }
+    }
+
+    private func centeredActionLabel(_ title: String, systemImage: String) -> some View {
+        Label(title, systemImage: systemImage)
+            .lineLimit(2)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity, minHeight: 24, alignment: .center)
     }
 
     private func settingPickerRow<Value: Hashable>(
