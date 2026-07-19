@@ -8,6 +8,7 @@ struct MandatoryDailyFlowGateView: View {
 
     let context: MandatoryDailyFlowContext
     let onCompleted: (MandatoryDailyFlowContext?) -> Void
+    let onInterrupted: () -> Void
 
     @State private var currentStep: MandatoryDailyFlowStep?
     @State private var didInitialize = false
@@ -23,7 +24,9 @@ struct MandatoryDailyFlowGateView: View {
                     .safeAreaInset(edge: .top, spacing: 0) {
                         MandatoryFlowProgressBanner(
                             period: context.period,
-                            step: currentStep
+                            step: currentStep,
+                            canInterrupt: canInterrupt,
+                            onInterrupt: interruptFlow
                         )
                     }
             } else {
@@ -189,7 +192,7 @@ struct MandatoryDailyFlowGateView: View {
     }
 
     private var latestMorningSession: SleepSession? {
-        sleepStore.sessions
+        sleepStore.resolvedSessions
             .filter {
                 calendar.isDate(
                     DailyFlowPeriod.morningFlowDay(
@@ -307,6 +310,16 @@ struct MandatoryDailyFlowGateView: View {
         return startedAt >= interval.start && startedAt < interval.end
     }
 
+    private var canInterrupt: Bool {
+        !(currentStep == .nightSleep && sleepStore.activeTimerStartedAt != nil)
+    }
+
+    private func interruptFlow() {
+        guard canInterrupt, !isCompleting else { return }
+        learningStore.stopSleepPlayback()
+        onInterrupted()
+    }
+
     private func advance(
         to step: MandatoryDailyFlowStep,
         targetSleepSessionID: UUID? = nil
@@ -362,6 +375,8 @@ struct MandatoryDailyFlowGateView: View {
 private struct MandatoryFlowProgressBanner: View {
     let period: DailyFlowPeriod
     let step: MandatoryDailyFlowStep
+    let canInterrupt: Bool
+    let onInterrupt: () -> Void
 
     private var totalSteps: Int {
         period == .morning ? 3 : 4
@@ -378,10 +393,17 @@ private struct MandatoryFlowProgressBanner: View {
 
                 Spacer()
 
-                Text("\(step.number) / \(totalSteps)・\(step.title)")
-                    .font(.caption.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(.secondary)
+                if canInterrupt {
+                    Button("あとで", action: onInterrupt)
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
             }
+
+            Text("\(step.number) / \(totalSteps)・\(step.title)")
+                .font(.caption.weight(.semibold).monospacedDigit())
+                .foregroundStyle(.secondary)
 
             ProgressView(
                 value: Double(max(0, step.number - 1)),

@@ -64,7 +64,7 @@ private struct HistoryMonthCalendar: View {
             calendar.date(byAdding: .day, value: day - 1, to: monthStart)
         }
 
-        while cells.count.isMultiple(of: 7) == false {
+        while cells.count < 42 {
             cells.append(nil)
         }
         return cells
@@ -297,7 +297,7 @@ struct HistoryView: View {
     }
 
     private var selectedSessions: [SleepSession] {
-        sleepStore.sessions
+        sleepStore.resolvedSessions
             .filter { calendar.isDate($0.wakeDay, inSameDayAs: selectedDay) }
             .sorted { $0.endDate > $1.endDate }
     }
@@ -317,7 +317,7 @@ struct HistoryView: View {
         let visibleDays = Set(days)
         var totals: [Date: (minutes: Int, targetMinutes: Int, latestEnd: Date)] = [:]
 
-        for session in sleepStore.sessions {
+        for session in sleepStore.resolvedSessions {
             let day = calendar.startOfDay(for: session.wakeDay)
             guard visibleDays.contains(day) else { continue }
 
@@ -410,7 +410,7 @@ struct HistoryView: View {
             HistoryMonthCalendar(
                 displayedMonth: displayedMonth,
                 selectedDay: selectedDay,
-                sessions: sleepStore.sessions,
+                sessions: sleepStore.resolvedSessions,
                 calendar: calendar,
                 onSelectDay: selectDay,
                 onMoveMonth: moveDisplayedMonth,

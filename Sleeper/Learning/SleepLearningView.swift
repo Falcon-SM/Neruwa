@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 enum SleepLearningPhase: String, CaseIterable, Hashable {
     case study
@@ -36,6 +37,9 @@ struct SleepLearningView: View {
     @State private var studyIndex = 0
     @State private var isStudyAnswerVisible = false
     @State private var isPresentingAddCard = false
+    @State private var isImportingCSV = false
+    @State private var csvImportMessage: String?
+    @State private var selectedFolder = "__all__"
     @State private var pendingDeletionID: UUID?
     @State private var draftVolume: Float = 0.35
     @State private var isAdjustingVolume = false
@@ -90,8 +94,10 @@ struct SleepLearningView: View {
 
                 switch phase {
                 case .study:
+                    folderFilterSection
                     studySection
                 case .audio:
+                    folderFilterSection
                     audioSection
                 case .test:
                     testSection
@@ -116,6 +122,10 @@ struct SleepLearningView: View {
             }
         }
         .onChange(of: learningStore.cards.map(\.id)) { _, _ in
+            if selectedFolder != "__all__",
+               !learningStore.folderNames.contains(selectedFolder) {
+                selectedFolder = "__all__"
+            }
             normalizeStudyIndex()
             if quizQuestions.contains(where: { question in
                 !learningStore.cards.contains(where: { $0.id == question.cardID })
@@ -123,17 +133,21 @@ struct SleepLearningView: View {
                 resetQuiz()
             }
         }
+        .onChange(of: selectedFolder) { _, _ in
+            normalizeStudyIndex()
+        }
         .onChange(of: targetSleepSessionID) { _, _ in
             resetQuiz()
         }
         .sheet(isPresented: $isPresentingAddCard) {
-            AddLearningCardSheet { prompt, answer, speechText, languageCode in
+            AddLearningCardSheet { prompt, answer, speechText, languageCode, folderName in
                 learningStore.addCard(
                     prompt: prompt,
                     answer: answer,
                     speechText: speechText,
                     languageCode: languageCode,
-                    brailleCells: nil
+                    brailleCells: nil,
+                    folderName: folderName
                 )
             }
             .presentationDetents([.large])
@@ -162,6 +176,23 @@ struct SleepLearningView: View {
             }
         } message: {
             Text("このカードを学習・音声・テストから削除します。")
+        }
+        .fileImporter(
+            isPresented: $isImportingCSV,
+            allowedContentTypes: [.commaSeparatedText, .plainText],
+            allowsMultipleSelection: false,
+            onCompletion: importCSV
+        )
+        .alert(
+            "CSVインポート",
+            isPresented: Binding(
+                get: { csvImportMessage != nil },
+                set: { if !$0 { csvImportMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { csvImportMessage = nil }
+        } message: {
+            Text(csvImportMessage ?? "")
         }
     }
 
@@ -192,6 +223,21 @@ struct SleepLearningView: View {
     }
 
     @ViewBuilder
+    private var folderFilterSection: some View {
+        if !learningStore.folderNames.isEmpty {
+            Section {
+                Picker("フォルダ", selection: $selectedFolder) {
+                    Text("すべて").tag("__all__")
+                    ForEach(learningStore.folderNames, id: \.self) { folder in
+                        Text(folder).tag(folder)
+                    }
+                }
+                .pickerStyle(.menu)
+            }
+        }
+    }
+
+    @ViewBuilder
     private var studySection: some View {
         Section {
             if let card = currentStudyCard {
@@ -202,7 +248,7 @@ struct SleepLearningView: View {
                 } label: {
                     VStack(spacing: 12) {
                         HStack {
-                            Text("\(studyIndex + 1) / \(learningStore.cards.count)")
+                            Text("\(studyIndex + 1) / \(filteredCards.count)")
                                 .font(.caption.weight(.semibold).monospacedDigit())
                             Spacer()
                             Text(card.languageCode)
@@ -235,7 +281,7 @@ struct SleepLearningView: View {
             HStack {
                 Text("学習カード")
                 Spacer()
-                Text("\(learningStore.cards.count)枚")
+                Text("\(filteredCards.count)枚")
                     .monospacedDigit()
             }
         } footer: {
@@ -255,14 +301,7 @@ struct SleepLearningView: View {
                 }
             }
 
-            Button {
-                isPresentingAddCard = true
-            } label: {
-                centeredActionLabel("自分のカードを追加", systemImage: "plus")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-            .frame(maxWidth: .infinity)
+            addCardsMenu(title: "自分のカードを追加")
 
             if showsStudyContinuation {
                 Button {
@@ -469,19 +508,12 @@ struct SleepLearningView: View {
         }
 
         Section {
-            Button {
-                isPresentingAddCard = true
-            } label: {
-                centeredActionLabel("カードを追加", systemImage: "plus")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-            .frame(maxWidth: .infinity)
+            addCardsMenu(title: "カードを追加")
 
-            if learningStore.cards.isEmpty {
+            if filteredCards.isEmpty {
                 emptyCardsRow
             } else {
-                ForEach(learningStore.cards, id: \.id) { card in
+                ForEach(filteredCards, id: \.id) { card in
                     audioSelectionRow(card)
                         .swipeActions(edge: .trailing) {
                             Button(role: .destructive) {
@@ -538,6 +570,9 @@ struct SleepLearningView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                    Label(card.folderName, systemImage: "folder.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
 
                 Spacer(minLength: 6)
@@ -732,6 +767,27 @@ struct SleepLearningView: View {
             .frame(maxWidth: .infinity, minHeight: 24, alignment: .center)
     }
 
+    private func addCardsMenu(title: String) -> some View {
+        Menu {
+            Button {
+                isPresentingAddCard = true
+            } label: {
+                Label("1枚ずつ追加", systemImage: "rectangle.stack.badge.plus")
+            }
+
+            Button {
+                isImportingCSV = true
+            } label: {
+                Label("CSVからまとめて追加", systemImage: "tablecells.badge.ellipsis")
+            }
+        } label: {
+            centeredActionLabel(title, systemImage: "plus")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+        .frame(maxWidth: .infinity)
+    }
+
     private func settingPickerRow<Value: Hashable>(
         title: String,
         symbol: String,
@@ -751,8 +807,14 @@ struct SleepLearningView: View {
     }
 
     private var currentStudyCard: LearningCard? {
-        guard learningStore.cards.indices.contains(studyIndex) else { return nil }
-        return learningStore.cards[studyIndex]
+        guard filteredCards.indices.contains(studyIndex) else { return nil }
+        return filteredCards[studyIndex]
+    }
+
+    private var filteredCards: [LearningCard] {
+        selectedFolder == "__all__"
+            ? learningStore.cards
+            : learningStore.cards.filter { $0.folderName == selectedFolder }
     }
 
     private var navigationTitle: String {
@@ -852,10 +914,10 @@ struct SleepLearningView: View {
     }
 
     private func normalizeStudyIndex() {
-        if learningStore.cards.isEmpty {
+        if filteredCards.isEmpty {
             studyIndex = 0
         } else {
-            studyIndex = min(max(studyIndex, 0), learningStore.cards.count - 1)
+            studyIndex = min(max(studyIndex, 0), filteredCards.count - 1)
         }
         isStudyAnswerVisible = false
     }
@@ -869,10 +931,30 @@ struct SleepLearningView: View {
     }
 
     private func nextStudyCard() {
-        guard studyIndex < learningStore.cards.count - 1 else { return }
+        guard studyIndex < filteredCards.count - 1 else { return }
         withAnimation(.snappy) {
             studyIndex += 1
             isStudyAnswerVisible = false
+        }
+    }
+
+    private func importCSV(_ result: Result<[URL], Error>) {
+        do {
+            guard let url = try result.get().first else { return }
+            let hasAccess = url.startAccessingSecurityScopedResource()
+            defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
+            let data = try Data(contentsOf: url)
+            let fallbackFolder = url.deletingPathExtension().lastPathComponent
+            let parsed = try LearningCSVImporter.parse(
+                data: data,
+                defaultFolderName: fallbackFolder
+            )
+            let count = learningStore.importCards(parsed.rows)
+            csvImportMessage = count > 0
+                ? "\(count)枚を追加しました。\(parsed.skippedRows > 0 ? "\(parsed.skippedRows)行は空欄のためスキップしました。" : "")"
+                : (learningStore.errorMessage ?? "追加できるカードがありませんでした。")
+        } catch {
+            csvImportMessage = error.localizedDescription
         }
     }
 
@@ -1103,12 +1185,13 @@ private struct BrailleCell: View {
 private struct AddLearningCardSheet: View {
     @Environment(\.dismiss) private var dismiss
 
-    let onSave: (String, String, String, String) -> Void
+    let onSave: (String, String, String, String, String) -> Void
 
     @State private var prompt = ""
     @State private var answer = ""
     @State private var speechText = ""
     @State private var languageCode = "ja-JP"
+    @State private var folderName = "自分のカード"
 
     private var normalizedPrompt: String {
         prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1125,6 +1208,14 @@ private struct AddLearningCardSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    TextField("例：英単語 Unit 1", text: $folderName)
+                } header: {
+                    Text("フォルダ")
+                } footer: {
+                    Text("点字・英単語・授業ごとなど、好きな名前でカードを分けられます。")
+                }
+
                 Section {
                     TextField("例：TLSとは？", text: $prompt, axis: .vertical)
                         .lineLimit(1...3)
@@ -1153,7 +1244,7 @@ private struct AddLearningCardSheet: View {
                 } header: {
                     Text("読み上げ")
                 } footer: {
-                    Text("点字カードは初期デッキに含まれます。追加したカードは通常の問題カードとして使えます。")
+                    Text("英単語は問題に単語、答えに意味を入れ、読み上げ言語を英語にすると音声学習にも使えます。")
                 }
             }
             .scrollDismissesKeyboard(.interactively)
@@ -1181,7 +1272,10 @@ private struct AddLearningCardSheet: View {
             normalizedPrompt,
             normalizedAnswer,
             spoken.isEmpty ? normalizedAnswer : spoken,
-            languageCode
+            languageCode,
+            folderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "自分のカード"
+                : folderName
         )
         dismiss()
     }

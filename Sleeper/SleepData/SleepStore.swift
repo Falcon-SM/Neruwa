@@ -21,6 +21,10 @@ public final class SleepStore: ObservableObject {
     private var cloudWriteTail: Task<Void, Never>?
     private var syncOperationCount = 0
 
+    public var resolvedSessions: [SleepSession] {
+        SleepSessionResolver.resolved(sessions)
+    }
+
     public init() {
         let defaults = UserDefaults.standard
         let profileID = Self.guestProfileID
@@ -133,8 +137,7 @@ public final class SleepStore: ObservableObject {
             updatedAt: endDate
         )
         activeTimerStartedAt = nil
-        save(session, message: "睡眠記録を保存しました。おはようございます。")
-        return session
+        return save(session, message: "睡眠記録を保存しました。おはようございます。")
     }
 
     @discardableResult
@@ -170,8 +173,7 @@ public final class SleepStore: ObservableObject {
             createdAt: now,
             updatedAt: now
         )
-        save(session, message: "睡眠記録を追加しました。")
-        return session
+        return save(session, message: "睡眠記録を追加しました。")
     }
 
     public func session(id: UUID) -> SleepSession? {
@@ -287,11 +289,11 @@ public final class SleepStore: ObservableObject {
                 )
             }
 
-            save(
+            let savedSession = save(
                 importedSession,
                 message: "\(healthData.sourceName) の睡眠記録を取り込みました。"
             )
-            return importedSession
+            return savedSession
         } catch {
             errorMessage = error.localizedDescription
             statusMessage = nil
@@ -466,23 +468,38 @@ private extension SleepStore {
         }
     }
 
-    func save(_ session: SleepSession, message: String) {
+    @discardableResult
+    func save(_ session: SleepSession, message: String) -> SleepSession {
+        let savedSession: SleepSession
         if let index = sessions.firstIndex(where: { $0.id == session.id }) {
             sessions[index] = session
+            savedSession = session
+        } else if let index = sessions.firstIndex(where: {
+            SleepSessionResolver.areEquivalent($0, session)
+        }) {
+            let merged = SleepSessionResolver.merged(
+                preservingIDOf: sessions[index],
+                with: session
+            )
+            sessions[index] = merged
+            savedSession = merged
         } else {
             sessions.append(session)
+            savedSession = session
         }
         sessions.sort(by: Self.sessionSort)
-        deletions.removeAll { $0.id == session.id }
-        statusMessage = message
+        deletions.removeAll { $0.id == savedSession.id }
+        statusMessage = savedSession.id == session.id
+            ? message
+            : "同じ睡眠時間帯の記録を1件にまとめました。"
         persistLocally()
-        enqueueCloudMutation(.upsert(session))
+        enqueueCloudMutation(.upsert(savedSession))
+        return savedSession
     }
 
     func matchingHealthSessionIndex(for healthData: HealthKitSleepData) -> Int? {
         if let exactMatch = sessions.firstIndex(where: {
-            $0.source == .healthKit
-                && $0.externalIdentifier == healthData.externalIdentifier
+            $0.externalIdentifier == healthData.externalIdentifier
         }) {
             return exactMatch
         }
@@ -491,18 +508,15 @@ private extension SleepStore {
         return sessions.indices
             .filter { index in
                 let session = sessions[index]
-                guard session.source == .healthKit else { return false }
-                guard calendar.isDate(session.endDate, inSameDayAs: healthData.endDate) else {
-                    return false
-                }
-                let overlapStart = max(session.startDate, healthData.startDate)
-                let overlapEnd = min(session.endDate, healthData.endDate)
-                let overlap = max(0, overlapEnd.timeIntervalSince(overlapStart))
-                let shorterDuration = min(
-                    session.endDate.timeIntervalSince(session.startDate),
-                    healthData.endDate.timeIntervalSince(healthData.startDate)
+                let candidate = SleepSession(
+                    startDate: healthData.startDate,
+                    endDate: healthData.endDate,
+                    targetMinutes: session.targetMinutes,
+                    source: .healthKit,
+                    stages: healthData.stages,
+                    externalIdentifier: healthData.externalIdentifier
                 )
-                return overlap >= min(60 * 60, shorterDuration * 0.5)
+                return SleepSessionResolver.areEquivalent(session, candidate, calendar: calendar)
             }
             .max { lhs, rhs in
                 let lhsDifference = abs(

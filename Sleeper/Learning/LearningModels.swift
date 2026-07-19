@@ -1,11 +1,19 @@
 import Foundation
 
+public enum LearningCardOrigin: String, Codable, Hashable, Sendable {
+    case bundled
+    case user
+    case csv
+}
+
 public struct LearningCard: Identifiable, Codable, Hashable, Sendable {
     public var id: UUID
     public var prompt: String
     public var answer: String
     public var speechText: String
     public var languageCode: String
+    public var folderName: String
+    public var origin: LearningCardOrigin
 
     /// One array per braille cell, containing dot numbers in the range 1...6.
     /// Generic vocabulary cards leave this value as `nil`.
@@ -17,14 +25,48 @@ public struct LearningCard: Identifiable, Codable, Hashable, Sendable {
         answer: String,
         speechText: String,
         languageCode: String,
-        brailleCells: [[Int]]? = nil
+        brailleCells: [[Int]]? = nil,
+        folderName: String? = nil,
+        origin: LearningCardOrigin? = nil
     ) {
+        let normalizedCells = Self.normalizedBrailleCells(brailleCells)
         self.id = id
         self.prompt = prompt
         self.answer = answer
         self.speechText = speechText
         self.languageCode = languageCode
-        self.brailleCells = Self.normalizedBrailleCells(brailleCells)
+        self.brailleCells = normalizedCells
+        self.folderName = Self.normalizedFolderName(
+            folderName,
+            fallback: normalizedCells == nil ? "自分のカード" : "点字"
+        )
+        self.origin = origin ?? (normalizedCells == nil ? .user : .bundled)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case prompt
+        case answer
+        case speechText
+        case languageCode
+        case brailleCells
+        case folderName
+        case origin
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let cells = try container.decodeIfPresent([[Int]].self, forKey: .brailleCells)
+        self.init(
+            id: try container.decode(UUID.self, forKey: .id),
+            prompt: try container.decode(String.self, forKey: .prompt),
+            answer: try container.decode(String.self, forKey: .answer),
+            speechText: try container.decode(String.self, forKey: .speechText),
+            languageCode: try container.decode(String.self, forKey: .languageCode),
+            brailleCells: cells,
+            folderName: try container.decodeIfPresent(String.self, forKey: .folderName),
+            origin: try container.decodeIfPresent(LearningCardOrigin.self, forKey: .origin)
+        )
     }
 
     private static func normalizedBrailleCells(_ cells: [[Int]]?) -> [[Int]]? {
@@ -34,6 +76,14 @@ public struct LearningCard: Identifiable, Codable, Hashable, Sendable {
             return dots.isEmpty ? nil : dots
         }
         return normalized.isEmpty ? nil : normalized
+    }
+
+    private static func normalizedFolderName(
+        _ folderName: String?,
+        fallback: String
+    ) -> String {
+        let normalized = folderName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return normalized.isEmpty ? fallback : String(normalized.prefix(40))
     }
 }
 

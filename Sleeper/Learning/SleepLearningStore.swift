@@ -134,6 +134,12 @@ public final class SleepLearningStore: NSObject, ObservableObject {
         cards.filter { settings.selectedCardIDs.contains($0.id) }
     }
 
+    public var folderNames: [String] {
+        Array(Set(cards.map(\.folderName))).sorted {
+            $0.localizedStandardCompare($1) == .orderedAscending
+        }
+    }
+
     public func activateProfile(_ requestedProfileID: String) {
         let normalizedProfileID = Self.normalizedProfileID(requestedProfileID)
         guard normalizedProfileID != profileID else { return }
@@ -164,7 +170,9 @@ public final class SleepLearningStore: NSObject, ObservableObject {
         answer: String,
         speechText: String,
         languageCode: String,
-        brailleCells: [[Int]]? = nil
+        brailleCells: [[Int]]? = nil,
+        folderName: String = "自分のカード",
+        origin: LearningCardOrigin = .user
     ) -> LearningCard? {
         errorMessage = nil
         guard let card = validatedCard(
@@ -173,7 +181,9 @@ public final class SleepLearningStore: NSObject, ObservableObject {
             answer: answer,
             speechText: speechText,
             languageCode: languageCode,
-            brailleCells: brailleCells
+            brailleCells: brailleCells,
+            folderName: folderName,
+            origin: origin
         ) else {
             return nil
         }
@@ -195,7 +205,8 @@ public final class SleepLearningStore: NSObject, ObservableObject {
         answer: String,
         speechText: String,
         languageCode: String,
-        brailleCells: [[Int]]? = nil
+        brailleCells: [[Int]]? = nil,
+        folderName: String? = nil
     ) {
         errorMessage = nil
         guard let index = cards.firstIndex(where: { $0.id == id }) else {
@@ -208,7 +219,9 @@ public final class SleepLearningStore: NSObject, ObservableObject {
             answer: answer,
             speechText: speechText,
             languageCode: languageCode,
-            brailleCells: brailleCells
+            brailleCells: brailleCells,
+            folderName: folderName ?? cards[index].folderName,
+            origin: cards[index].origin
         ) else {
             return
         }
@@ -219,6 +232,50 @@ public final class SleepLearningStore: NSObject, ObservableObject {
         cards[index] = updatedCard
         statusMessage = "学習カードを更新しました。"
         persistLocally()
+    }
+
+    @discardableResult
+    func importCards(_ importedRows: [LearningCardImportRow]) -> Int {
+        errorMessage = nil
+        guard !importedRows.isEmpty else {
+            errorMessage = "追加できるカードがありませんでした。"
+            return 0
+        }
+
+        if isPlaying {
+            stopPlayback(showStatus: false)
+        }
+
+        var fingerprints = Set(cards.map(Self.cardFingerprint))
+        var importedCards: [LearningCard] = []
+        for row in importedRows {
+            guard let card = validatedCard(
+                id: UUID(),
+                prompt: row.prompt,
+                answer: row.answer,
+                speechText: row.speechText,
+                languageCode: row.languageCode,
+                brailleCells: nil,
+                folderName: row.folderName,
+                origin: .csv
+            ) else {
+                continue
+            }
+            guard fingerprints.insert(Self.cardFingerprint(card)).inserted else { continue }
+            importedCards.append(card)
+        }
+
+        guard !importedCards.isEmpty else {
+            errorMessage = "同じカードがすでにあるため、追加はありませんでした。"
+            return 0
+        }
+
+        cards.append(contentsOf: importedCards)
+        settings.selectedCardIDs.formUnion(importedCards.map(\.id))
+        settings = settings.normalized(availableCardIDs: Set(cards.map(\.id)))
+        statusMessage = "CSVから\(importedCards.count)枚のカードを追加しました。"
+        persistLocally()
+        return importedCards.count
     }
 
     public func deleteCard(id: UUID) {
@@ -480,7 +537,9 @@ private extension SleepLearningStore {
                 answer: answer,
                 speechText: speechText,
                 languageCode: languageCode.isEmpty ? "ja-JP" : languageCode,
-                brailleCells: card.brailleCells
+                brailleCells: card.brailleCells,
+                folderName: card.folderName,
+                origin: card.origin
             )
         }
         let availableIDs = Set(cards.map(\.id))
@@ -528,7 +587,9 @@ private extension SleepLearningStore {
         answer: String,
         speechText: String,
         languageCode: String,
-        brailleCells: [[Int]]?
+        brailleCells: [[Int]]?,
+        folderName: String,
+        origin: LearningCardOrigin
     ) -> LearningCard? {
         let normalizedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedAnswer = answer.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -554,8 +615,19 @@ private extension SleepLearningStore {
             answer: normalizedAnswer,
             speechText: normalizedSpeechText,
             languageCode: normalizedLanguageCode.isEmpty ? "ja-JP" : normalizedLanguageCode,
-            brailleCells: brailleCells
+            brailleCells: brailleCells,
+            folderName: folderName,
+            origin: origin
         )
+    }
+
+    static func cardFingerprint(_ card: LearningCard) -> String {
+        [card.folderName, card.prompt, card.answer]
+            .map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            }
+            .joined(separator: "\u{1F}")
     }
 
     static func makePlaybackQueue(

@@ -18,7 +18,7 @@ struct ShareView: View {
     }
 
     private var latestSummary: SleepShareSummary? {
-        guard let latestSession = sleepStore.sessions.max(by: {
+        guard let latestSession = sleepStore.resolvedSessions.max(by: {
             $0.endDate < $1.endDate
         }) else {
             return nil

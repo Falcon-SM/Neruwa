@@ -79,9 +79,16 @@ struct ContentView: View {
     @ViewBuilder
     private var authenticatedRoot: some View {
         if let context = mandatoryFlowContext {
-            MandatoryDailyFlowGateView(context: context) { nextContext in
-                handleMandatoryFlowCompletion(nextContext)
-            }
+            MandatoryDailyFlowGateView(
+                context: context,
+                onCompleted: { nextContext in
+                    handleMandatoryFlowCompletion(nextContext)
+                },
+                onInterrupted: {
+                    learningStore.stopSleepPlayback()
+                    mandatoryFlowContext = nil
+                }
+            )
             .id(context.id)
             .interactiveDismissDisabled()
         } else {
@@ -329,7 +336,7 @@ struct ContentView: View {
         guard let user else { return }
 
         let calendar = Calendar.current
-        let sessionsByMorningFlowDay = Dictionary(grouping: sleepStore.sessions) {
+        let sessionsByMorningFlowDay = Dictionary(grouping: sleepStore.resolvedSessions) {
             DailyFlowPeriod.morningFlowDay(
                 containing: $0.endDate,
                 calendar: calendar,
