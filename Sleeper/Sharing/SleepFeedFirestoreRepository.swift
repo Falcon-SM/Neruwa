@@ -1,11 +1,7 @@
 import FirebaseFirestore
 import Foundation
 
-/// Firestore transport for the authenticated in-app feed.
 ///
-/// `SleepFeedPost` is already privacy-reduced before it reaches this boundary.
-/// The authenticated UID is kept in a separate owner document that other users
-/// cannot read. Public post documents contain no account identifier.
 @MainActor
 final class SleepFeedFirestoreRepository {
     struct ReactionState: Sendable {
@@ -23,37 +19,26 @@ final class SleepFeedFirestoreRepository {
         self.userID = userID
         self.database = database
     }
-
+    
     func fetchPosts() async throws -> [SleepFeedPost] {
-        let snapshot = try await postsCollection
+        let snapshot = try await userPostsCollection
             .order(by: "createdAt", descending: true)
             .limit(to: Self.maximumPostCount)
             .getDocuments()
 
-        // One indexed collection-group query obtains only this user's reaction
-        // documents. If it fails, the store keeps the cached feed rather than
-        // guessing that every post is unreacted.
-        let reactedPostIDs = try await fetchReactedPostIDs()
-
         return snapshot.documents.compactMap { document in
             decode(
                 documentID: document.documentID,
-                data: document.data(),
-                reactedPostIDs: reactedPostIDs
+                data: document.data()
             )
         }
     }
-
     func publish(_ post: SleepFeedPost) async throws {
-        let postReference = postsCollection.document(post.id)
-        let ownerReference = database
-            .collection("sleepFeedPostOwners")
-            .document(post.id)
-        let batch = database.batch()
-        batch.setData([
+        let postReference = userPostsCollection.document(post.id)
+        
+        try await postReference.setData([
             "schemaVersion": Self.schemaVersion,
             "authorAlias": post.authorAlias,
-            // This is midnight on the calendar day, never the wake time.
             "wakeDay": post.wakeDay,
             "durationMinutes": post.durationMinutes,
             "achievementPercentage": post.achievementPercentage.map { $0 as Any } ?? NSNull(),
@@ -61,24 +46,18 @@ final class SleepFeedFirestoreRepository {
             "comment": post.comment,
             "createdAt": FieldValue.serverTimestamp(),
             "reactionCount": 0
-        ], forDocument: postReference)
-        batch.setData([
-            "ownerID": userID,
-            "createdAt": FieldValue.serverTimestamp()
-        ], forDocument: ownerReference)
-        try await batch.commit()
+        ])
     }
 
-    /// Atomically writes the current user's reaction and updates the aggregate
-    /// count. The accompanying Security Rules should require both writes.
     func setReaction(
         postID: String,
         isReacted desiredState: Bool
     ) async throws -> ReactionState {
-        let postReference = postsCollection.document(postID)
+        let postReference = userPostsCollection.document(postID)
         let reactionReference = postReference
             .collection("sleepFeedReactions")
             .document(userID)
+
         let existingReaction = try await reactionReference.getDocument()
         let currentState = existingReaction.exists
 
@@ -115,24 +94,13 @@ final class SleepFeedFirestoreRepository {
 }
 
 private extension SleepFeedFirestoreRepository {
-    var postsCollection: CollectionReference {
-        database.collection("sleepFeedPosts")
-    }
-
-    func fetchReactedPostIDs() async throws -> Set<String> {
-        let snapshot = try await database
-            .collectionGroup("sleepFeedReactions")
-            .whereField("userID", isEqualTo: userID)
-            .getDocuments()
-        return Set(snapshot.documents.compactMap {
-            $0.reference.parent.parent?.documentID
-        })
+    var userPostsCollection: CollectionReference {
+        database.collection("users").document(userID).collection("sleepPosts")
     }
 
     func decode(
         documentID: String,
-        data: [String: Any],
-        reactedPostIDs: Set<String>
+        data: [String: Any]
     ) -> SleepFeedPost? {
         guard Self.integer(data["schemaVersion"]) == Self.schemaVersion,
               let alias = data["authorAlias"] as? String,
@@ -157,7 +125,7 @@ private extension SleepFeedFirestoreRepository {
             comment: comment,
             createdAt: createdTimestamp.dateValue(),
             reactionCount: reactionCount,
-            isReactedByCurrentUser: reactedPostIDs.contains(documentID),
+            isReactedByCurrentUser: false,
             delivery: .cloud
         )
     }
