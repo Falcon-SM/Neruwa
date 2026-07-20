@@ -8,6 +8,7 @@ import SwiftUI
 enum MainTab: Hashable {
     case sleep
     case learning
+    case pvt
     case history
     case sharing
 }
@@ -31,8 +32,14 @@ struct MainView: View {
     @State private var flowNow = Date()
     @State private var isSettingsPresented = false
 
-    init(user: Binding<AppUser?>) {
+    let onStartDemoFlow: (DailyFlowPeriod) -> Void
+
+    init(
+        user: Binding<AppUser?>,
+        onStartDemoFlow: @escaping (DailyFlowPeriod) -> Void = { _ in }
+    ) {
         _user = user
+        self.onStartDemoFlow = onStartDemoFlow
     }
 
     var body: some View {
@@ -49,6 +56,11 @@ struct MainView: View {
             Tab("学習", systemImage: "book.fill", value: .learning) {
                 SleepLearningView()
                     .environment(\.isAmbientBackgroundActive, selectedTab == .learning)
+            }
+
+            Tab("PVT", systemImage: "bolt.fill", value: .pvt) {
+                PVTView()
+                    .environment(\.isAmbientBackgroundActive, selectedTab == .pvt)
             }
 
             Tab("記録", systemImage: "chart.bar.xaxis", value: .history) {
@@ -88,6 +100,10 @@ struct MainView: View {
                     onLogout: {
                         isSettingsPresented = false
                         user = nil
+                    },
+                    onStartDemoFlow: { period in
+                        isSettingsPresented = false
+                        onStartDemoFlow(period)
                     }
                 )
                 .environmentObject(sleepStore)
@@ -188,5 +204,6 @@ private struct MissingUserView: View {
     MainView(user: .constant(.guest))
         .environmentObject(SleepStore())
         .environmentObject(SleepLearningStore())
+        .environmentObject(PVTStore())
         .environmentObject(EveningStore())
 }

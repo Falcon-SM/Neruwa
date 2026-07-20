@@ -101,6 +101,23 @@ struct SleepLearningView: View {
                     audioSection
                 case .test:
                     testSection
+                    if allowsTestSkipping,
+                       currentQuizQuestion != nil,
+                       let onOpenHistory {
+                        Section {
+                            Button {
+                                skipMorningTest(then: onOpenHistory)
+                            } label: {
+                                centeredActionLabel(
+                                    "テストをスキップして記録へ",
+                                    systemImage: "arrow.right"
+                                )
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.large)
+                            .frame(maxWidth: .infinity)
+                        }
+                    }
                 }
             }
             .listStyle(.insetGrouped)
@@ -202,11 +219,6 @@ struct SleepLearningView: View {
             Section {
                 Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
-            }
-        } else if let statusMessage = learningStore.statusMessage, !statusMessage.isEmpty {
-            Section {
-                Label(statusMessage, systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
             }
         }
     }

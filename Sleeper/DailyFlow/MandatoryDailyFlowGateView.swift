@@ -3,6 +3,7 @@ import SwiftUI
 struct MandatoryDailyFlowGateView: View {
     @EnvironmentObject private var sleepStore: SleepStore
     @EnvironmentObject private var learningStore: SleepLearningStore
+    @EnvironmentObject private var pvtStore: PVTStore
     @EnvironmentObject private var eveningStore: EveningStore
     @EnvironmentObject private var flowStore: MandatoryDailyFlowStore
 
@@ -59,7 +60,7 @@ struct MandatoryDailyFlowGateView: View {
                     dismissesOnSave: false
                 ) { sessionID in
                     flowStore.setTargetSleepSessionID(context, sessionID: sessionID)
-                    advance(to: .morningTest, targetSleepSessionID: sessionID)
+                    advance(to: .morningPVT, targetSleepSessionID: sessionID)
                 }
                 .environmentObject(sleepStore)
             } else {
@@ -72,16 +73,30 @@ struct MandatoryDailyFlowGateView: View {
                         mood: mood,
                         note: note
                     )
-                    advance(to: .morningTest)
+                    advance(to: .morningPVT)
                 }
             }
+
+        case .morningPVT:
+            PVTView(
+                sleepSessionID: targetMorningSession?.id,
+                onCompleted: { result in
+                    flowStore.markMorningPVTCompleted(context, resultID: result.id)
+                    advance(to: .morningTest)
+                },
+                onSkip: {
+                    flowStore.markMorningPVTSkipped(context)
+                    advance(to: .morningTest)
+                }
+            )
+            .environmentObject(pvtStore)
 
         case .morningTest:
             SleepLearningView(
                 phase: .constant(.test),
                 targetSleepSessionID: targetMorningSession?.id,
                 showsPhaseSelector: false,
-                allowsTestSkipping: false,
+                allowsTestSkipping: true,
                 onOpenHistory: {
                     attachPendingReflectionIfPossible()
                     advance(to: .morningRecord)
@@ -235,7 +250,7 @@ struct MandatoryDailyFlowGateView: View {
             guard session.mood != nil else {
                 return .morningMood
             }
-            return .morningTest
+            return .morningPVT
 
         case .night:
             if hasActiveTimerForCurrentNight {
@@ -253,19 +268,32 @@ struct MandatoryDailyFlowGateView: View {
 
         switch step {
         case .morningMood:
-            if let session = targetMorningSession, session.mood != nil {
-                advance(to: .morningTest, targetSleepSessionID: session.id)
+            if !context.isDemo,
+               let session = targetMorningSession,
+               session.mood != nil {
+                advance(to: .morningPVT, targetSleepSessionID: session.id)
+                reconcilePersistedData()
+            }
+
+        case .morningPVT:
+            if flowProgress?.morningPVTCompletedAt != nil {
+                advance(to: .morningTest)
                 reconcilePersistedData()
             }
 
         case .morningTest:
+            if flowProgress?.morningPVTCompletedAt == nil {
+                advance(to: .morningPVT)
+                return
+            }
             if flowProgress?.morningTestCompletedAt != nil {
                 attachPendingReflectionIfPossible()
                 advance(to: .morningRecord)
             }
 
         case .nightJournal:
-            if eveningStore.entry(
+            if !context.isDemo,
+               eveningStore.entry(
                 for: context.targetDay,
                 calendar: calendar
             )?.completedAt != nil {
@@ -357,13 +385,21 @@ struct MandatoryDailyFlowGateView: View {
             calendar: calendar,
             schedule: context.schedule
         )
-        let morningContext = MandatoryDailyFlowContext(
-            profileID: context.profileID,
-            period: .morning,
-            targetDay: morningDay,
-            calendar: calendar,
-            schedule: context.schedule
-        )
+        let morningContext = context.isDemo
+            ? MandatoryDailyFlowContext(
+                profileID: context.profileID,
+                demoPeriod: .morning,
+                now: morningDay,
+                calendar: calendar,
+                schedule: context.schedule
+            )
+            : MandatoryDailyFlowContext(
+                profileID: context.profileID,
+                period: .morning,
+                targetDay: morningDay,
+                calendar: calendar,
+                schedule: context.schedule
+            )
         flowStore.beginMorningHandoff(
             morningContext,
             targetSleepSessionID: session.id
@@ -379,14 +415,14 @@ private struct MandatoryFlowProgressBanner: View {
     let onInterrupt: () -> Void
 
     private var totalSteps: Int {
-        period == .morning ? 3 : 4
+        4
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack {
                 Label(
-                    period == .morning ? "朝の流れ" : "夜の流れ",
+                    period == .morning ? "朝" : "夜",
                     systemImage: period == .morning ? "sunrise.fill" : "moon.stars.fill"
                 )
                 .font(.subheadline.weight(.semibold))
@@ -406,7 +442,7 @@ private struct MandatoryFlowProgressBanner: View {
                 .foregroundStyle(.secondary)
 
             ProgressView(
-                value: Double(max(0, step.number - 1)),
+                value: Double(min(totalSteps, max(0, step.number))),
                 total: Double(totalSteps)
             )
             .tint(period == .morning ? .orange : .indigo)
@@ -539,7 +575,7 @@ private struct MandatoryMorningRecordView: View {
                     reflectionSummary
 
                     Button(action: onCompleted) {
-                        Label("朝の流れを完了", systemImage: "checkmark.circle.fill")
+                        Text("朝の流れを完了")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)

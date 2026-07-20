@@ -3,6 +3,7 @@ import Foundation
 
 enum MandatoryDailyFlowStep: String, Codable, Equatable, Sendable {
     case morningMood
+    case morningPVT
     case morningTest
     case morningRecord
     case nightJournal
@@ -14,8 +15,9 @@ enum MandatoryDailyFlowStep: String, Codable, Equatable, Sendable {
     var number: Int {
         switch self {
         case .morningMood: 1
-        case .morningTest: 2
-        case .morningRecord: 3
+        case .morningPVT: 2
+        case .morningTest: 3
+        case .morningRecord: 4
         case .nightJournal: 1
         case .nightStudy: 2
         case .nightAudio: 3
@@ -27,6 +29,7 @@ enum MandatoryDailyFlowStep: String, Codable, Equatable, Sendable {
     var title: String {
         switch self {
         case .morningMood: "気分"
+        case .morningPVT: "PVT"
         case .morningTest: "点字テスト"
         case .morningRecord: "記録"
         case .nightJournal: "日記"
@@ -43,6 +46,9 @@ struct MandatoryDailyFlowProgress: Codable, Equatable, Sendable {
     var targetSleepSessionID: UUID?
     var pendingMood: SleepMood?
     var pendingNote: String
+    var morningPVTCompletedAt: Date?
+    var morningPVTResultID: UUID?
+    var morningPVTWasSkipped: Bool?
     var morningTestCompletedAt: Date?
     var morningTestResultID: UUID?
     /// `true` only when waking from the mandatory night timer created this
@@ -56,6 +62,9 @@ struct MandatoryDailyFlowProgress: Codable, Equatable, Sendable {
         targetSleepSessionID: UUID? = nil,
         pendingMood: SleepMood? = nil,
         pendingNote: String = "",
+        morningPVTCompletedAt: Date? = nil,
+        morningPVTResultID: UUID? = nil,
+        morningPVTWasSkipped: Bool = false,
         morningTestCompletedAt: Date? = nil,
         morningTestResultID: UUID? = nil,
         isNightTimerHandoff: Bool = false,
@@ -66,6 +75,9 @@ struct MandatoryDailyFlowProgress: Codable, Equatable, Sendable {
         self.targetSleepSessionID = targetSleepSessionID
         self.pendingMood = pendingMood
         self.pendingNote = pendingNote
+        self.morningPVTCompletedAt = morningPVTCompletedAt
+        self.morningPVTResultID = morningPVTResultID
+        self.morningPVTWasSkipped = morningPVTWasSkipped
         self.morningTestCompletedAt = morningTestCompletedAt
         self.morningTestResultID = morningTestResultID
         self.isNightTimerHandoff = isNightTimerHandoff
@@ -80,6 +92,7 @@ struct MandatoryDailyFlowContext: Identifiable, Equatable, Sendable {
     let targetDay: Date
     let flowID: String
     let schedule: DailyFlowSchedule
+    let isDemo: Bool
 
     init(
         profileID: String,
@@ -89,6 +102,7 @@ struct MandatoryDailyFlowContext: Identifiable, Equatable, Sendable {
     ) {
         self.profileID = profileID
         self.schedule = schedule
+        self.isDemo = false
         self.period = DailyFlowPeriod(
             date: now,
             calendar: calendar,
@@ -129,11 +143,27 @@ struct MandatoryDailyFlowContext: Identifiable, Equatable, Sendable {
         self.period = period
         self.targetDay = normalizedDay
         self.schedule = schedule
+        self.isDemo = false
         self.flowID = MandatoryDailyFlowStore.flowID(
             period: period,
             targetDay: normalizedDay,
             calendar: calendar
         )
+    }
+
+    init(
+        profileID: String,
+        demoPeriod: DailyFlowPeriod,
+        now: Date = Date(),
+        calendar: Calendar = .current,
+        schedule: DailyFlowSchedule = .default
+    ) {
+        self.profileID = profileID
+        self.period = demoPeriod
+        self.targetDay = calendar.startOfDay(for: now)
+        self.schedule = schedule
+        self.isDemo = true
+        self.flowID = "demo.\(demoPeriod == .morning ? "morning" : "night").\(UUID().uuidString)"
     }
 
     var id: String {
@@ -226,6 +256,19 @@ final class MandatoryDailyFlowStore: ObservableObject {
         persist()
     }
 
+    func restart(
+        _ context: MandatoryDailyFlowContext,
+        at step: MandatoryDailyFlowStep,
+        targetSleepSessionID: UUID? = nil
+    ) {
+        guard Self.normalizedProfileID(context.profileID) == profileID else { return }
+        progressByFlowID[context.flowID] = MandatoryDailyFlowProgress(
+            step: step,
+            targetSleepSessionID: targetSleepSessionID
+        )
+        persist()
+    }
+
     func savePendingMorningReflection(
         _ context: MandatoryDailyFlowContext,
         mood: SleepMood,
@@ -260,6 +303,31 @@ final class MandatoryDailyFlowStore: ObservableObject {
         let completedAt = Date()
         progress.morningTestCompletedAt = completedAt
         progress.morningTestResultID = resultID
+        progress.updatedAt = completedAt
+        progressByFlowID[context.flowID] = progress
+        persist()
+    }
+
+    func markMorningPVTCompleted(
+        _ context: MandatoryDailyFlowContext,
+        resultID: UUID
+    ) {
+        guard var progress = progress(for: context) else { return }
+        let completedAt = Date()
+        progress.morningPVTCompletedAt = completedAt
+        progress.morningPVTResultID = resultID
+        progress.morningPVTWasSkipped = false
+        progress.updatedAt = completedAt
+        progressByFlowID[context.flowID] = progress
+        persist()
+    }
+
+    func markMorningPVTSkipped(_ context: MandatoryDailyFlowContext) {
+        guard var progress = progress(for: context) else { return }
+        let completedAt = Date()
+        progress.morningPVTCompletedAt = completedAt
+        progress.morningPVTResultID = nil
+        progress.morningPVTWasSkipped = true
         progress.updatedAt = completedAt
         progressByFlowID[context.flowID] = progress
         persist()

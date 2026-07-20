@@ -397,11 +397,6 @@ struct HistoryView: View {
                 Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
             }
-        } else if let statusMessage = sleepStore.statusMessage, !statusMessage.isEmpty {
-            Section {
-                Label(statusMessage, systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-            }
         }
     }
 

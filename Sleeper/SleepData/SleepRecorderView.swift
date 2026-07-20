@@ -192,10 +192,6 @@ struct SleepRecorderView: View {
             Label(errorMessage, systemImage: "exclamationmark.circle.fill")
                 .font(.callout)
                 .foregroundStyle(.red)
-        } else if let statusMessage = sleepStore.statusMessage, !statusMessage.isEmpty {
-            Label(statusMessage, systemImage: "checkmark.circle.fill")
-                .font(.callout)
-                .foregroundStyle(.green)
         }
     }
 

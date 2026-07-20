@@ -26,6 +26,7 @@ struct ContentView: View {
     @State private var mandatoryFlowContext: MandatoryDailyFlowContext?
     @StateObject private var sleepStore = SleepStore()
     @StateObject private var learningStore = SleepLearningStore()
+    @StateObject private var pvtStore = PVTStore()
     @StateObject private var eveningStore = EveningStore()
     @StateObject private var mandatoryFlowStore = MandatoryDailyFlowStore()
 
@@ -38,6 +39,7 @@ struct ContentView: View {
                 authenticatedRoot
                     .environmentObject(sleepStore)
                     .environmentObject(learningStore)
+                    .environmentObject(pvtStore)
                     .environmentObject(eveningStore)
                     .environmentObject(mandatoryFlowStore)
                     .transition(.opacity)
@@ -82,7 +84,11 @@ struct ContentView: View {
             MandatoryDailyFlowGateView(
                 context: context,
                 onCompleted: { nextContext in
-                    handleMandatoryFlowCompletion(nextContext)
+                    if context.isDemo, nextContext == nil {
+                        mandatoryFlowContext = nil
+                    } else {
+                        handleMandatoryFlowCompletion(nextContext)
+                    }
                 },
                 onInterrupted: {
                     learningStore.stopSleepPlayback()
@@ -92,8 +98,30 @@ struct ContentView: View {
             .id(context.id)
             .interactiveDismissDisabled()
         } else {
-            MainView(user: authenticatedUser)
+            MainView(
+                user: authenticatedUser,
+                onStartDemoFlow: startDemoFlow
+            )
         }
+    }
+
+    private func startDemoFlow(_ period: DailyFlowPeriod) {
+        guard let user else { return }
+        mandatoryFlowStore.activateProfile(user.id)
+        let context = MandatoryDailyFlowContext(
+            profileID: user.id,
+            demoPeriod: period,
+            schedule: dailyFlowSchedule
+        )
+        let initialStep: MandatoryDailyFlowStep = period == .morning
+            ? .morningMood
+            : (sleepStore.activeTimerStartedAt == nil ? .nightJournal : .nightSleep)
+        mandatoryFlowStore.restart(
+            context,
+            at: initialStep,
+            targetSleepSessionID: nil
+        )
+        mandatoryFlowContext = context
     }
 
     /// Keeps the current MainView API compatible while making `user = nil`
@@ -117,6 +145,7 @@ struct ContentView: View {
                 if let updatedUser {
                     sleepStore.activateProfile(updatedUser.id)
                     learningStore.activateProfile(updatedUser.id)
+                    pvtStore.activateProfile(updatedUser.id)
                     eveningStore.activateProfile(updatedUser.id)
                     mandatoryFlowStore.activateProfile(updatedUser.id)
                 }
@@ -134,6 +163,7 @@ struct ContentView: View {
                 if let signedInUser {
                     sleepStore.activateProfile(signedInUser.id)
                     learningStore.activateProfile(signedInUser.id)
+                    pvtStore.activateProfile(signedInUser.id)
                     eveningStore.activateProfile(signedInUser.id)
                     mandatoryFlowStore.activateProfile(signedInUser.id)
                 }
@@ -157,6 +187,7 @@ struct ContentView: View {
         if let restoredUser {
             sleepStore.activateProfile(restoredUser.id)
             learningStore.activateProfile(restoredUser.id)
+            pvtStore.activateProfile(restoredUser.id)
             eveningStore.activateProfile(restoredUser.id)
             mandatoryFlowStore.activateProfile(restoredUser.id)
         }

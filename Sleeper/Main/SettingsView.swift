@@ -24,6 +24,7 @@ struct SettingsView: View {
     @State private var showsEveningDeleteConfirmation = false
 
     let onLogout: () -> Void
+    let onStartDemoFlow: (DailyFlowPeriod) -> Void
 
     var body: some View {
         NavigationStack {
@@ -31,6 +32,7 @@ struct SettingsView: View {
                 profileSection
                 sleepGoalSection
                 dailyFlowTimeSection
+                demoSection
                 sharingSection
                 healthSection
                 dataSection
@@ -211,6 +213,26 @@ struct SettingsView: View {
         }
     }
 
+    private var demoSection: some View {
+        Section {
+            Button {
+                onStartDemoFlow(.morning)
+            } label: {
+                Label("朝を今すぐ始める", systemImage: "sunrise.fill")
+            }
+
+            Button {
+                onStartDemoFlow(.night)
+            } label: {
+                Label("夜を今すぐ始める", systemImage: "moon.stars.fill")
+            }
+        } header: {
+            Text("デモ")
+        } footer: {
+            Text("設定時刻や今日の完了状態に関係なく、選んだ流れを最初から開始します。")
+        }
+    }
+
     private var healthSection: some View {
         Section {
             Label {
@@ -245,12 +267,6 @@ struct SettingsView: View {
             Section("睡眠記録データ") {
                 LabeledContent("保存済み睡眠記録", value: "\(sleepStore.sessions.count)件")
 
-                if let statusMessage = sleepStore.statusMessage {
-                    Label(statusMessage, systemImage: "checkmark.circle.fill")
-                        .font(.footnote)
-                        .foregroundStyle(.green)
-                }
-
                 if let errorMessage = sleepStore.errorMessage {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                         .font(.footnote)
@@ -267,12 +283,6 @@ struct SettingsView: View {
 
             Section("夜の日記データ") {
                 LabeledContent("保存済み夜の日記", value: "\(eveningStore.entries.count)件")
-
-                if let statusMessage = eveningStore.statusMessage {
-                    Label(statusMessage, systemImage: "checkmark.circle.fill")
-                        .font(.footnote)
-                        .foregroundStyle(.green)
-                }
 
                 if let errorMessage = eveningStore.errorMessage {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
@@ -372,7 +382,11 @@ struct SettingsView: View {
 }
 
 #Preview {
-    SettingsView(user: .constant(.guest), onLogout: {})
+    SettingsView(
+        user: .constant(.guest),
+        onLogout: {},
+        onStartDemoFlow: { _ in }
+    )
         .environmentObject(SleepStore())
         .environmentObject(EveningStore())
 }
