@@ -107,11 +107,11 @@ struct PVTView: View {
         switch testState {
         case .introduction:
             VStack(spacing: 16) {
-                Image(systemName: "bolt.circle.fill")
-                    .font(.system(size: 54))
-                    .foregroundStyle(.yellow)
-                Text("光ったらすぐにタップ")
-                    .font(.title2.bold())
+                MascotPromptView(
+                    message: "光ったら、すぐにタップしてね",
+                    detail: "90秒だけ、一緒に反応の速さを測ります。",
+                    imageSize: 86
+                )
                 Text("暗い円が黄色に変わるまで待ち、変わった瞬間に押します。90秒間繰り返します。")
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

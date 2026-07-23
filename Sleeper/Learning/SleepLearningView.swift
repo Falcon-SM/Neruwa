@@ -84,6 +84,11 @@ struct SleepLearningView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    MascotInlinePrompt(message: "今日も少しずつ覚えていこう")
+                        .listRowBackground(Color.clear)
+                }
+
                 statusMessages
 
                 if showsPhaseSelector {
@@ -646,9 +651,7 @@ struct SleepLearningView: View {
 
                 if let cells = question.brailleCells, !cells.isEmpty {
                     VStack(spacing: 10) {
-                        Text("この点字はどのかな？")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                        MascotInlinePrompt(message: "この点字はどのかな？")
                         BrailleCellsView(cells: cells)
                     }
                     .frame(maxWidth: .infinity)
@@ -689,11 +692,10 @@ struct SleepLearningView: View {
             }
         } else {
             Section {
-                Label("朝の記憶をチェック", systemImage: "sun.horizon.fill")
-                    .font(.headline)
-
-                Text("2枚以上のカードから、最大10問を出題します。")
-                    .foregroundStyle(.secondary)
+                MascotPromptView(
+                    message: "昨日のカード、どのくらい覚えているかな？",
+                    detail: "2枚以上のカードから、最大10問を出題します。"
+                )
 
                 Button(action: startQuiz) {
                     centeredActionLabel("テストを始める", systemImage: "play.fill")

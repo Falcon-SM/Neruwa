@@ -21,11 +21,27 @@ enum AppEnvironment {
         false
 #endif
     }
+
+    static var showcaseScreen: String? {
+#if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let optionIndex = arguments.firstIndex(of: "-NeruwaShowcase"),
+              arguments.indices.contains(optionIndex + 1) else {
+            return nil
+        }
+        return arguments[optionIndex + 1]
+#else
+        return nil
+#endif
+    }
 }
 
 enum FirebaseBootstrap {
     private static let configureOnce: Void = {
-        guard !AppEnvironment.isRunningForPreviews else { return }
+        guard !AppEnvironment.isRunningForPreviews,
+              AppEnvironment.showcaseScreen == nil else {
+            return
+        }
         FirebaseApp.configure()
     }()
 
@@ -42,7 +58,17 @@ struct SleeperApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            Group {
+#if DEBUG
+                if let screen = AppEnvironment.showcaseScreen {
+                    AppShowcaseView(screen: screen)
+                } else {
+                    ContentView()
+                }
+#else
+                ContentView()
+#endif
+            }
                 .onOpenURL { url in
                     GIDSignIn.sharedInstance.handle(url)
                 }

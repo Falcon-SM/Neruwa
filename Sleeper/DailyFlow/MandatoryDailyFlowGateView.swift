@@ -480,15 +480,14 @@ private struct MandatoryMorningMoodView: View {
         NavigationStack {
             List {
                 Section {
-                    Label(
-                        "睡眠記録はあとで追加できます",
-                        systemImage: "clock.badge.questionmark"
+                    MascotPromptView(
+                        message: "おはよう。今朝の気分を教えてね",
+                        detail: "睡眠記録はあとから追加しても、自動で今日の気分と結び付きます。"
                     )
-                    .font(.subheadline.weight(.semibold))
-
-                    Text("今の気分を先に保存し、追加された睡眠記録へ自動で結び付けます。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    .listRowInsets(
+                        EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0)
+                    )
+                    .listRowBackground(Color.clear)
                 }
 
                 Section("今朝の気分") {

@@ -29,6 +29,7 @@
 - 通常タブでの点字・英単語などの学習と、必須フロー内の睡眠音声設定・睡眠セッション単位の朝テスト
 - 自作カードのフォルダ分けとCSV一括インポート（UTF-8 / Shift_JIS、日本語・英語読み上げ）
 - 合図への反応時間、500ms以上の遅延、フライングを90秒間測る簡易PVTと、1日・1週間・1ヶ月の比較グラフ
+- 手描きのひよこイラストを、アプリアイコンと朝・夜・学習・PVTの問いかけに使用
 - 学習カード・再生設定・テスト結果のアカウント別ローカル保存
 - 「みんなの睡眠」と分離した投稿画面から、最新の睡眠時間・目標達成率・任意の気分・短文を投稿
 - 投稿ごとの公開範囲は「みんな」または「この端末のみ」から選択し、既定値を設定で変更
@@ -107,6 +108,20 @@ CSVは1行目を `prompt,answer,speech,language,folder` とする形式を推奨
 - 睡眠時間は時計と同じアナログ表示、履歴は日付・睡眠時間・気分色を一度に確認できるコンパクトな月間グリッドで構成
 - SF Symbols、Dynamic Type、標準スワイプ操作を利用し、ヘルスケアや時計と同じ操作感を優先
 - iPhoneでは「睡眠記録・学習・PVT・記録・共有」の5タブ、広い画面ではシステムのサイドバーへ適応
+
+## スクリーンショット
+
+iPhone 17シミュレータで撮影した画像を、用途ごとに個別のPNGで保存しています。
+
+- [睡眠記録](AppScreenshots/01-sleep-record.png)
+- [睡眠学習](AppScreenshots/02-learning.png)
+- [PVT](AppScreenshots/03-pvt.png)
+- [睡眠の記録・カレンダー](AppScreenshots/04-history.png)
+- [みんなの睡眠](AppScreenshots/05-sharing.png)
+- [設定](AppScreenshots/06-settings.png)
+- [朝の流れ](AppScreenshots/07-morning-flow.png)
+- [夜の流れ](AppScreenshots/08-night-flow.png)
+- [アプリアイコン](AppScreenshots/app-icon.png)
 
 ## 軽量化
 

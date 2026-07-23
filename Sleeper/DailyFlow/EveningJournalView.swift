@@ -59,6 +59,7 @@ struct EveningJournalView: View {
             Form {
                 flowProgressSection
                 stepSelectorSection
+                mascotPromptSection
                 currentStepSection
                 navigationSection
             }
@@ -126,6 +127,42 @@ struct EveningJournalView: View {
             }
             .pickerStyle(.segmented)
             .accessibilityValue("\(step.rawValue + 1) / \(EveningJournalStep.allCases.count)、\(step.title)")
+        }
+    }
+
+    private var mascotPromptSection: some View {
+        Section {
+            MascotPromptView(
+                message: mascotMessage,
+                detail: mascotDetail,
+                imageSize: 72
+            )
+            .listRowInsets(
+                EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0)
+            )
+            .listRowBackground(Color.clear)
+        }
+    }
+
+    private var mascotMessage: String {
+        switch step {
+        case .today:
+            "今日あったことを、少しだけ聞かせて"
+        case .letGo:
+            "今夜はここに置いて、いったん休もう"
+        case .tomorrow:
+            "明日の自分に、小さな予定を3つまで"
+        }
+    }
+
+    private var mascotDetail: String {
+        switch step {
+        case .today:
+            "短いひとことでも、空欄でも大丈夫です。"
+        case .letGo:
+            "今すぐ答えを出さなくてよいことを書けます。"
+        case .tomorrow:
+            "全部埋めなくても、そのまま次へ進めます。"
         }
     }
 
