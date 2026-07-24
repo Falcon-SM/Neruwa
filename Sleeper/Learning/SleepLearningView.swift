@@ -50,7 +50,7 @@ struct SleepLearningView: View {
     @State private var correctQuizAnswers = 0
     @State private var isQuizComplete = false
 
-    private let intervalOptions: [Double] = [30, 60, 120, 300]
+    private let intervalOptions: [Double] = [5, 30, 60, 120, 300]
     private let durationOptions = [15, 30, 60, 90, 390]
 
     private let targetSleepSessionID: UUID?
@@ -259,8 +259,12 @@ struct SleepLearningView: View {
         Section {
             if let card = currentStudyCard {
                 Button {
+                    let willRevealAnswer = !isStudyAnswerVisible
                     withAnimation(.snappy) {
                         isStudyAnswerVisible.toggle()
+                    }
+                    if willRevealAnswer {
+                        learningStore.speakStudyCard(card)
                     }
                 } label: {
                     VStack(spacing: 12) {
@@ -302,7 +306,7 @@ struct SleepLearningView: View {
                     .monospacedDigit()
             }
         } footer: {
-            Text("カードをタップすると答えを表示します。")
+            Text("カードをタップすると答えを表示し、設定した内容を読み上げます。")
         }
 
         Section {
@@ -521,7 +525,7 @@ struct SleepLearningView: View {
         } header: {
             Text("再生設定")
         } footer: {
-            Text("眠りを妨げない小さな音量から試してください。学習効果を保証する機能ではなく、端末負荷を抑えるため再生は最大120回です。")
+            Text("短い音声も聞き取りやすいよう、音声を最大+18dBまで増幅します。音割れや睡眠の妨げを避けるため、小さな設定から試してください。再生は最大120回です。")
         }
 
         Section {
@@ -965,7 +969,7 @@ struct SleepLearningView: View {
             )
             let count = learningStore.importCards(parsed.rows)
             csvImportMessage = count > 0
-                ? "\(count)枚を追加しました。\(parsed.skippedRows > 0 ? "\(parsed.skippedRows)行は空欄のためスキップしました。" : "")"
+                ? "\(count)枚を取り込みました。\(parsed.skippedRows > 0 ? "\(parsed.skippedRows)行は空欄のためスキップしました。" : "")"
                 : (learningStore.errorMessage ?? "追加できるカードがありませんでした。")
         } catch {
             csvImportMessage = error.localizedDescription

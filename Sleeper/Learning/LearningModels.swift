@@ -163,7 +163,7 @@ public struct SleepLearningSettings: Codable, Hashable, Sendable {
         selectedCardIDs: Set<UUID> = [],
         intervalSeconds: Double = 5 * 60,
         durationMinutes: Int = 6 * 60 + 30,
-        volume: Float = 0.35,
+        volume: Float = 0.60,
         shuffle: Bool = true,
         autoStartWithSleepTimer: Bool = false
     ) {
@@ -196,7 +196,7 @@ public struct SleepLearningSettings: Codable, Hashable, Sendable {
     }
 
     private static func clampedVolume(_ value: Float) -> Float {
-        guard value.isFinite else { return 0.35 }
+        guard value.isFinite else { return 0.60 }
         return min(max(value, 0), 1)
     }
 }

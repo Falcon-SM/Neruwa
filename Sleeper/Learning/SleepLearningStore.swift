@@ -101,10 +101,9 @@ public final class SleepLearningStore: NSObject, ObservableObject {
     private static let maximumStoredResults = 100
 
     private let defaults: UserDefaults
-    private let speechSynthesizer: AVSpeechSynthesizer
+    private let amplifiedSpeechPlayer: AmplifiedSpeechPlayer
     private var profileID: String
-    private var cardsByUtteranceID: [ObjectIdentifier: LearningCard] = [:]
-    private var pendingUtteranceIDs: Set<ObjectIdentifier> = []
+    private var playbackTask: Task<Void, Never>?
     private var audioSessionIsActive = false
 
     public override init() {
@@ -116,7 +115,7 @@ public final class SleepLearningStore: NSObject, ObservableObject {
         )
 
         self.defaults = defaults
-        self.speechSynthesizer = AVSpeechSynthesizer()
+        self.amplifiedSpeechPlayer = AmplifiedSpeechPlayer()
         self.profileID = profileID
         self.cards = loadResult.state.cards
         self.results = loadResult.state.results
@@ -127,7 +126,6 @@ public final class SleepLearningStore: NSObject, ObservableObject {
         self.errorMessage = loadResult.errorMessage
 
         super.init()
-        speechSynthesizer.delegate = self
     }
 
     public var selectedCards: [LearningCard] {
@@ -246,8 +244,8 @@ public final class SleepLearningStore: NSObject, ObservableObject {
             stopPlayback(showStatus: false)
         }
 
-        var fingerprints = Set(cards.map(Self.cardFingerprint))
         var importedCards: [LearningCard] = []
+        var updatedCards = 0
         for row in importedRows {
             guard let card = validatedCard(
                 id: UUID(),
@@ -255,17 +253,33 @@ public final class SleepLearningStore: NSObject, ObservableObject {
                 answer: row.answer,
                 speechText: row.speechText,
                 languageCode: row.languageCode,
-                brailleCells: nil,
+                brailleCells: row.brailleCells,
                 folderName: row.folderName,
                 origin: .csv
             ) else {
                 continue
             }
-            guard fingerprints.insert(Self.cardFingerprint(card)).inserted else { continue }
+
+            let fingerprint = Self.cardFingerprint(card)
+            if let existingIndex = cards.firstIndex(where: {
+                Self.cardFingerprint($0) == fingerprint
+            }) {
+                guard cards[existingIndex].origin == .csv else { continue }
+
+                var replacement = card
+                replacement.id = cards[existingIndex].id
+                settings.selectedCardIDs.insert(replacement.id)
+                if replacement != cards[existingIndex] {
+                    cards[existingIndex] = replacement
+                    updatedCards += 1
+                }
+                continue
+            }
             importedCards.append(card)
         }
 
-        guard !importedCards.isEmpty else {
+        let affectedCards = importedCards.count + updatedCards
+        guard affectedCards > 0 else {
             errorMessage = "同じカードがすでにあるため、追加はありませんでした。"
             return 0
         }
@@ -273,9 +287,15 @@ public final class SleepLearningStore: NSObject, ObservableObject {
         cards.append(contentsOf: importedCards)
         settings.selectedCardIDs.formUnion(importedCards.map(\.id))
         settings = settings.normalized(availableCardIDs: Set(cards.map(\.id)))
-        statusMessage = "CSVから\(importedCards.count)枚のカードを追加しました。"
+        if updatedCards > 0, !importedCards.isEmpty {
+            statusMessage = "CSVから\(importedCards.count)枚を追加し、\(updatedCards)枚を更新しました。"
+        } else if updatedCards > 0 {
+            statusMessage = "CSVから\(updatedCards)枚のカードを更新しました。"
+        } else {
+            statusMessage = "CSVから\(importedCards.count)枚のカードを追加しました。"
+        }
         persistLocally()
-        return importedCards.count
+        return affectedCards
     }
 
     public func deleteCard(id: UUID) {
@@ -421,29 +441,63 @@ public final class SleepLearningStore: NSObject, ObservableObject {
             return
         }
 
-        cardsByUtteranceID.removeAll(keepingCapacity: true)
-        pendingUtteranceIDs.removeAll(keepingCapacity: true)
         currentSpokenCard = nil
         isPlaying = true
         statusMessage = "睡眠学習を開始しました。\(playbackCards.count)回の音声を再生します。"
-
-        for (index, card) in playbackCards.enumerated() {
-            let utterance = AVSpeechUtterance(string: card.speechText)
-            utterance.voice = AVSpeechSynthesisVoice(language: card.languageCode)
-            utterance.volume = normalizedSettings.volume
-            utterance.postUtteranceDelay = index == playbackCards.index(before: playbackCards.endIndex)
-                ? 0
-                : normalizedSettings.intervalSeconds
-
-            let utteranceID = ObjectIdentifier(utterance)
-            cardsByUtteranceID[utteranceID] = card
-            pendingUtteranceIDs.insert(utteranceID)
-            speechSynthesizer.speak(utterance)
+        playbackTask = Task { [weak self] in
+            await self?.runPlaybackQueue(
+                playbackCards,
+                volume: normalizedSettings.volume,
+                intervalSeconds: normalizedSettings.intervalSeconds
+            )
         }
     }
 
     public func stopSleepPlayback() {
         stopPlayback(showStatus: true)
+    }
+
+    public func speakStudyCard(_ card: LearningCard) {
+        errorMessage = nil
+        stopPlayback(showStatus: false)
+
+        let text = card.speechText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            errorMessage = "このカードには読み上げる内容がありません。"
+            return
+        }
+
+        do {
+            try activateAudioSession()
+        } catch {
+            errorMessage = "カードを読み上げられませんでした（\(error.localizedDescription)）。"
+            deactivateAudioSession(reportError: false)
+            return
+        }
+
+        let utterance = makeUtterance(
+            text: text,
+            languageCode: card.languageCode
+        )
+        currentSpokenCard = card
+        isPlaying = true
+        statusMessage = "「\(text)」を読み上げています。"
+        playbackTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await amplifiedSpeechPlayer.play(
+                    utterance: utterance,
+                    cacheKey: Self.speechCacheKey(for: card),
+                    gainDecibels: Self.amplificationGainDecibels(for: 1)
+                )
+                guard !Task.isCancelled else { return }
+                finishPlayback(wasCancelled: false)
+            } catch is CancellationError {
+                return
+            } catch {
+                failPlayback(error)
+            }
+        }
     }
 }
 
@@ -654,6 +708,87 @@ private extension SleepLearningStore {
         return queue
     }
 
+    func makeUtterance(
+        text: String,
+        languageCode: String
+    ) -> AVSpeechUtterance {
+        let utterance = AVSpeechUtterance(string: text)
+        let normalizedCode = languageCode.replacingOccurrences(of: "_", with: "-")
+        utterance.voice = AVSpeechSynthesisVoice(language: normalizedCode)
+        utterance.volume = 1
+        return utterance
+    }
+
+    static func amplificationGainDecibels(for requestedVolume: Float) -> Float {
+        let clamped = min(max(requestedVolume, 0), 1)
+        guard clamped > 0 else { return -96 }
+        return -3 + (21 * clamped)
+    }
+
+    static func speechCacheKey(for card: LearningCard) -> String {
+        [card.languageCode, card.speechText].joined(separator: "\u{1F}")
+    }
+
+    func runPlaybackQueue(
+        _ playbackCards: [LearningCard],
+        volume: Float,
+        intervalSeconds: Double
+    ) async {
+        for (index, card) in playbackCards.enumerated() {
+            guard !Task.isCancelled else { return }
+            currentSpokenCard = card
+
+            do {
+                try await amplifiedSpeechPlayer.play(
+                    utterance: makeUtterance(
+                        text: card.speechText,
+                        languageCode: card.languageCode
+                    ),
+                    cacheKey: Self.speechCacheKey(for: card),
+                    gainDecibels: Self.amplificationGainDecibels(for: volume)
+                )
+            } catch is CancellationError {
+                return
+            } catch {
+                failPlayback(error)
+                return
+            }
+
+            guard index < playbackCards.index(before: playbackCards.endIndex) else {
+                finishPlayback(wasCancelled: false)
+                return
+            }
+
+            do {
+                try await Task.sleep(
+                    nanoseconds: UInt64(max(intervalSeconds, 0) * 1_000_000_000)
+                )
+            } catch {
+                return
+            }
+        }
+    }
+
+    func finishPlayback(wasCancelled: Bool) {
+        playbackTask = nil
+        currentSpokenCard = nil
+        isPlaying = false
+        deactivateAudioSession(reportError: true)
+        statusMessage = wasCancelled
+            ? "睡眠学習の再生が中断されました。"
+            : "睡眠学習の再生が完了しました。"
+    }
+
+    func failPlayback(_ error: Error) {
+        playbackTask = nil
+        amplifiedSpeechPlayer.stop()
+        currentSpokenCard = nil
+        isPlaying = false
+        deactivateAudioSession(reportError: false)
+        errorMessage = "音声を再生できませんでした（\(error.localizedDescription)）。"
+        statusMessage = nil
+    }
+
     func activateAudioSession() throws {
         let audioSession = AVAudioSession.sharedInstance()
         try audioSession.setCategory(
@@ -683,15 +818,11 @@ private extension SleepLearningStore {
 
     func stopPlayback(showStatus: Bool) {
         let hadPlayback = isPlaying
-            || speechSynthesizer.isSpeaking
-            || speechSynthesizer.isPaused
-            || !pendingUtteranceIDs.isEmpty
+            || amplifiedSpeechPlayer.isActive
 
-        if speechSynthesizer.isSpeaking || speechSynthesizer.isPaused {
-            speechSynthesizer.stopSpeaking(at: .immediate)
-        }
-        cardsByUtteranceID.removeAll(keepingCapacity: true)
-        pendingUtteranceIDs.removeAll(keepingCapacity: true)
+        playbackTask?.cancel()
+        playbackTask = nil
+        amplifiedSpeechPlayer.stop()
         currentSpokenCard = nil
         isPlaying = false
         deactivateAudioSession(reportError: showStatus)
@@ -701,27 +832,6 @@ private extension SleepLearningStore {
                 ? "睡眠学習の再生を停止しました。"
                 : "睡眠学習は停止中です。"
         }
-    }
-
-    func handleUtteranceStarted(id: ObjectIdentifier) {
-        guard isPlaying, let card = cardsByUtteranceID[id] else { return }
-        currentSpokenCard = card
-    }
-
-    func handleUtteranceFinished(id: ObjectIdentifier, wasCancelled: Bool) {
-        guard pendingUtteranceIDs.remove(id) != nil else { return }
-        if currentSpokenCard == cardsByUtteranceID[id] {
-            currentSpokenCard = nil
-        }
-        cardsByUtteranceID.removeValue(forKey: id)
-
-        guard pendingUtteranceIDs.isEmpty else { return }
-        isPlaying = false
-        currentSpokenCard = nil
-        deactivateAudioSession(reportError: true)
-        statusMessage = wasCancelled
-            ? "睡眠学習の再生が中断されました。"
-            : "睡眠学習の再生が完了しました。"
     }
 
     var persistenceKey: String {
@@ -735,37 +845,5 @@ private extension SleepLearningStore {
     static func normalizedProfileID(_ profileID: String) -> String {
         let trimmed = profileID.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? guestProfileID : trimmed
-    }
-}
-
-extension SleepLearningStore: AVSpeechSynthesizerDelegate {
-    nonisolated public func speechSynthesizer(
-        _ synthesizer: AVSpeechSynthesizer,
-        didStart utterance: AVSpeechUtterance
-    ) {
-        let utteranceID = ObjectIdentifier(utterance)
-        Task { @MainActor [weak self] in
-            self?.handleUtteranceStarted(id: utteranceID)
-        }
-    }
-
-    nonisolated public func speechSynthesizer(
-        _ synthesizer: AVSpeechSynthesizer,
-        didFinish utterance: AVSpeechUtterance
-    ) {
-        let utteranceID = ObjectIdentifier(utterance)
-        Task { @MainActor [weak self] in
-            self?.handleUtteranceFinished(id: utteranceID, wasCancelled: false)
-        }
-    }
-
-    nonisolated public func speechSynthesizer(
-        _ synthesizer: AVSpeechSynthesizer,
-        didCancel utterance: AVSpeechUtterance
-    ) {
-        let utteranceID = ObjectIdentifier(utterance)
-        Task { @MainActor [weak self] in
-            self?.handleUtteranceFinished(id: utteranceID, wasCancelled: true)
-        }
     }
 }
