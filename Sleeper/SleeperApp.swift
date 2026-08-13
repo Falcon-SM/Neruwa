@@ -8,53 +8,69 @@
 import SwiftUI
 import GoogleSignIn
 import FirebaseCore
-import FirebaseAuth
 
-class AppDelegate: NSObject, UIApplicationDelegate {
-    func application(_ application: UIApplication,
-                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
-        
-        // プレビュー時はFirebase初期化をパス
-        if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" {
-            return true
+enum AppEnvironment {
+    static var isRunningForPreviews: Bool {
+        ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
+    }
+
+    static var launchesGuestForUIValidation: Bool {
+#if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-NeruwaGuestMode")
+#else
+        false
+#endif
+    }
+
+    static var showcaseScreen: String? {
+#if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let optionIndex = arguments.firstIndex(of: "-NeruwaShowcase"),
+              arguments.indices.contains(optionIndex + 1) else {
+            return nil
         }
-        
+        return arguments[optionIndex + 1]
+#else
+        return nil
+#endif
+    }
+}
+
+enum FirebaseBootstrap {
+    private static let configureOnce: Void = {
+        guard !AppEnvironment.isRunningForPreviews,
+              AppEnvironment.showcaseScreen == nil else {
+            return
+        }
         FirebaseApp.configure()
-        return true
+    }()
+
+    static func configureIfNeeded() {
+        _ = configureOnce
     }
 }
 
 @main
 struct SleeperApp: App {
     init() {
-        if ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == nil {
-            FirebaseApp.configure()
-        }
+        FirebaseBootstrap.configureIfNeeded()
     }
-    
-    @State var user: AppUser?
-    
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            Group {
+#if DEBUG
+                if let screen = AppEnvironment.showcaseScreen {
+                    AppShowcaseView(screen: screen)
+                } else {
+                    ContentView()
+                }
+#else
+                ContentView()
+#endif
+            }
                 .onOpenURL { url in
                     GIDSignIn.sharedInstance.handle(url)
-                }
-                .task {
-                    guard ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == nil else { return }
-                    
-                    do {
-                        _ = try await GIDSignIn.sharedInstance.restorePreviousSignIn()
-                        
-                        if let firebaseUser = Auth.auth().currentUser {
-                            self.user = AppUser(
-                                id: firebaseUser.uid,
-                                name: firebaseUser.displayName ?? firebaseUser.email ?? "User"
-                            )
-                        }
-                    } catch {
-                        print("Failed to restore previous sign-in: \(error.localizedDescription)")
-                    }
                 }
         }
     }

@@ -19,3 +19,8 @@ xcuserdata/
 ## OS artifacts
 .DS_Store
 
+## Mascot generation intermediates
+Tools/Mascot/source/
+Tools/Mascot/work/
+Tools/Mascot/output/*
+Tools/Mascot/__pycache__/

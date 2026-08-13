@@ -17,6 +17,7 @@
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "749FEB3430039D3D00A15A0B"
                BuildableName = "Sleeper.app"
+               BlueprintName = "Sleeper"
                ReferencedContainer = "container:Sleeper.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -46,6 +47,7 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "749FEB3430039D3D00A15A0B"
             BuildableName = "Sleeper.app"
+            BlueprintName = "Sleeper"
             ReferencedContainer = "container:Sleeper.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -62,6 +64,7 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "749FEB3430039D3D00A15A0B"
             BuildableName = "Sleeper.app"
+            BlueprintName = "Sleeper"
             ReferencedContainer = "container:Sleeper.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
