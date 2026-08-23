@@ -98,7 +98,10 @@ struct SleepRecorderView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
-                    MascotInlinePrompt(message: "今日の眠りを一緒に記録しよう")
+                    NerurunStatusCard(
+                        sessions: sleepStore.resolvedSessions,
+                        targetMinutes: targetMinutes
+                    )
 
                     Text("睡眠時間を記録して、朝の調子と一緒に振り返ります。")
                         .font(.subheadline)
