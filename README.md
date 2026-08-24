@@ -1,6 +1,17 @@
-# ねるわ iOS
+# ねるわ iOS / Android
 
 「夜に睡眠を記録し、朝の状態と一緒に振り返る」ための SwiftUI アプリです。Web PoC の中心フローを引き継ぎつつ、Apple純正アプリと同じナビゲーション、リスト、フォームを使い、時刻だけで切り替わる軽量な空の背景を組み合わせています。
+
+Android版は [`Android`](Android) にあります。Jetpack ComposeとMaterial 3で同じ5タブ、時間帯別の朝・夜フロー、睡眠タイマー、学習カードとCSV、90秒PVT、気分色付きカレンダー、共有フィードを実装しています。Android版の3DねるるんはSceneView（Filament）でGLBを直接読み込み、状態に合わせて殻ごと揺れます。アプリアイコンと各問いかけにも同じモデルのレンダーを使用します。
+
+Android Studioで `Android` ディレクトリを開くか、JDK 17とAndroid SDK 37を用意して次を実行します。
+
+```bash
+cd Android
+./gradlew :app:assembleDebug
+```
+
+生成物は `Android/app/build/outputs/apk/debug/app-debug.apk` です。GitHub Actionsの `Android build` でも同じデバッグAPKを検証・保存します。
 
 ## プロダクト方針
 

@@ -1,0 +1,2 @@
+-keep class io.github.sceneview.** { *; }
+-keep class com.google.android.filament.** { *; }

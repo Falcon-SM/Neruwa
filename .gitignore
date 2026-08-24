@@ -24,3 +24,11 @@ Tools/Mascot/source/
 Tools/Mascot/work/
 Tools/Mascot/output/*
 Tools/Mascot/__pycache__/
+
+## Android
+.gradle/
+Android/.gradle/
+Android/local.properties
+Android/**/build/
+*.apk
+*.aab
