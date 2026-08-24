@@ -6,9 +6,10 @@ struct NerurunStatusCard: View {
 
     let sessions: [SleepSession]
     let targetMinutes: Int
+    var forcedStatus: NerurunStatus? = nil
 
     private var status: NerurunStatus {
-        NerurunStatusEvaluator.evaluate(
+        forcedStatus ?? NerurunStatusEvaluator.evaluate(
             sessions: sessions,
             fallbackTargetMinutes: targetMinutes
         )
@@ -111,7 +112,7 @@ private struct NerurunRockingModel: View {
                 .frame(width: 68, height: 8)
                 .foregroundStyle(.brown.opacity(0.58))
                 .blur(radius: 1.2)
-                .offset(y: -5)
+                .offset(y: -23)
             }
         }
     }

@@ -50,6 +50,14 @@ struct AppShowcaseView: View {
                 initialEntryMode: .manual,
                 showsHealthImport: false
             )
+        case "nerurun-normal":
+            nerurunStatusScreen(.normal, companionCount: 0)
+        case "nerurun-discouraged":
+            nerurunStatusScreen(.discouraged, companionCount: 0)
+        case "nerurun-exhausted":
+            nerurunStatusScreen(.exhausted, companionCount: 0)
+        case "nerurun-thriving":
+            nerurunStatusScreen(.thriving, companionCount: 3)
         case "learning":
             SleepLearningView()
         case "pvt":
@@ -81,9 +89,33 @@ struct AppShowcaseView: View {
         }
     }
 
+    private func nerurunStatusScreen(
+        _ condition: NerurunCondition,
+        companionCount: Int
+    ) -> some View {
+        NavigationStack {
+            VStack {
+                NerurunStatusCard(
+                    sessions: [],
+                    targetMinutes: 480,
+                    forcedStatus: NerurunStatus(
+                        condition: condition,
+                        companionCount: companionCount
+                    )
+                )
+                Spacer()
+            }
+            .padding()
+            .navigationTitle("ねるるんの様子")
+            .ambientScreenBackground()
+        }
+    }
+
     private var ambientScene: AmbientScene {
         switch screen {
-        case "sleep", "learning", "night":
+        case "sleep", "learning", "night",
+             "nerurun-normal", "nerurun-discouraged",
+             "nerurun-exhausted", "nerurun-thriving":
             .night
         default:
             .day
