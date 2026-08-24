@@ -4,7 +4,7 @@
 
 Android版は [`Android`](Android) にあります。Jetpack ComposeとMaterial 3で同じ5タブ、時間帯別の朝・夜フロー、睡眠タイマー、学習カードとCSV、90秒PVT、気分色付きカレンダー、共有フィードを実装しています。Android版の3DねるるんはSceneView（Filament）でGLBを直接読み込み、状態に合わせて殻ごと揺れます。アプリアイコンと各問いかけにも同じモデルのレンダーを使用します。
 
-Android Studioで `Android` ディレクトリを開くか、JDK 17とAndroid SDK 37を用意して次を実行します。
+Android Studioで `Android` ディレクトリを開くか、JDK 17とAndroid SDK 36を用意して次を実行します。
 
 ```bash
 cd Android

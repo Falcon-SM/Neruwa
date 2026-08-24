@@ -23,8 +23,8 @@ iOS版の主要体験をJetpack Composeへ移植したAndroidアプリです。
 必要環境:
 
 - JDK 17
-- Android SDK Platform 37
-- Android SDK Build Tools 37.0.0
+- Android SDK Platform 36
+- Android SDK Build Tools 36.0.0
 
 ```bash
 ./gradlew :app:assembleDebug
